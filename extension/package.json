@@ -1,0 +1,51 @@
+{
+  "name": "azplex",
+  "displayName": "azplex",
+  "description": "MCP server for Azure, Microsoft Fabric, and Azure DevOps — deploy, manage, and orchestrate from one interface",
+  "version": "1.0.0",
+  "publisher": "jhasiddhant",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jhasiddhant/azplex"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "azure",
+    "fabric",
+    "devops",
+    "bicep",
+    "copilot"
+  ],
+  "icon": "icon.png",
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "mcpServers": {
+      "azplex": {
+        "command": "azplex",
+        "args": [],
+        "env": {}
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0",
+    "typescript": "^5.4.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

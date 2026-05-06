@@ -1,0 +1,76 @@
+name: Publish azplex
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 1.0.1)'
+        required: true
+        type: string
+      publish_pip:
+        description: 'Publish to PyPI'
+        required: true
+        type: boolean
+        default: true
+      publish_extension:
+        description: 'Publish VS Code extension'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  publish-pip:
+    if: ${{ inputs.publish_pip }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Update version in pip/pyproject.toml
+        run: sed -i "s/^version = .*/version = \"${{ inputs.version }}\"/" pip/pyproject.toml
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        working-directory: pip
+        run: python -m build
+
+      - name: Publish to PyPI
+        working-directory: pip
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: twine upload dist/*
+
+  publish-extension:
+    if: ${{ inputs.publish_extension }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Update version in extension/package.json
+        run: |
+          cd extension
+          npm pkg set version="${{ inputs.version }}"
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm install
+
+      - name: Compile extension
+        working-directory: extension
+        run: npm run compile
+
+      - name: Publish to VS Code Marketplace
+        working-directory: extension
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx @vscode/vsce publish -p "$VSCE_PAT"
