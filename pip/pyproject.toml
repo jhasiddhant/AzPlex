@@ -1,20 +1,21 @@
 [build-system]
-requires = ["setuptools<69.5", "wheel"]
+requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "customazuremcpagent"
+name = "azplex"
 version = "1.0.0"
-description = "Azure MCP Agent for secure, compliant resource deployment"
-readme = "README.md"
+description = "MCP server for Azure, Microsoft Fabric, and Azure DevOps — deploy, manage, and orchestrate from one interface"
+readme = "../README.md"
 requires-python = ">=3.10"
+license = "MIT"
 authors = [
     {name = "Siddhant Jha"}
 ]
 dependencies = [
     "mcp>=0.1.0",
 ]
-keywords = ["mcp", "azure", "deployment", "bicep", "agent", "customazuremcpagent"]
+keywords = ["mcp", "azure", "fabric", "devops", "bicep", "azplex"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -27,20 +28,15 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jhasiddhant/AzureAgent"
-Repository = "https://github.com/jhasiddhant/AzureAgent"
-Issues = "https://github.com/jhasiddhant/AzureAgent/issues"
+Homepage = "https://github.com/jhasiddhant/azplex"
+Repository = "https://github.com/jhasiddhant/azplex"
+Issues = "https://github.com/jhasiddhant/azplex/issues"
 
 [project.scripts]
-customazuremcpagent = "agent.server:main"
+azplex = "azplex.server:main"
 
-[tool.setuptools]
-packages = ["agent"]
-include-package-data = true
+[tool.setuptools.packages.find]
+where = ["../src"]
 
 [tool.setuptools.package-data]
-agent = [
-    "scripts/*.ps1",
-    "templates/*.bicep",
-    "*.md"
-]
+azplex = ["scripts/*.ps1", "templates/*.bicep", "templates/*.yml", "AGENT_INSTRUCTIONS.md"]

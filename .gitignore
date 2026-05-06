@@ -1,4 +1,4 @@
-# .gitignore for Azure customazuremcpagent Agent Package
+# .gitignore for azplex
 
 # Python
 __pycache__/
@@ -69,7 +69,11 @@ pip-wheel-metadata/
 __pypackages__/
 .python-version
 coverage.xml
-customazuremcpagent.engg-info
+
+# VS Code extension
+extension/node_modules/
+extension/out/
+*.vsix
 
 # PyPI credentials (if accidentally created)
 .pypirc

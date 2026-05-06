@@ -1,0 +1,9 @@
+# Manifest file to include non-Python files in the package
+include ../LICENSE
+include ../README.md
+recursive-include ../src/azplex/scripts *.ps1
+recursive-include ../src/azplex/templates *.bicep *.yml
+include ../src/azplex/AGENT_INSTRUCTIONS.md
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store

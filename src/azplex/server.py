@@ -18,16 +18,16 @@ try:
     from . import fabric
     from . import general
 except ImportError:
-    import azure
-    import ado
-    import fabric
-    import general
+    from azplex import azure
+    from azplex import ado
+    from azplex import fabric
+    from azplex import general
 
 # ============================================================================
 # MCP SERVER INITIALIZATION
 # ============================================================================
 
-mcp = FastMCP("azure-agent")
+mcp = FastMCP("azplex")
 
 # ============================================================================
 # GENERAL TOOLS

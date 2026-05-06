@@ -1,11 +1,14 @@
 {
     "servers": {
-        "azure-agent": {
+        "azplex": {
             "command": "${workspaceFolder}/.venv/bin/python",
             "args": [
                 "-m",
-                "agent.server"
-            ]
+                "azplex.server"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     }
 }
