@@ -1,0 +1,74 @@
+name: Auto Release PR
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create PR for today's commits
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TODAY=$(date +%Y-%m-%d -d "+5 hours +30 minutes")
+          echo "Today (IST): $TODAY"
+
+          # Find the latest commit on dev whose author date <= today and not yet on main
+          TARGET=""
+          COMMITS=""
+          while IFS=' ' read -r hash date msg; do
+            if [[ "$date" < "$TODAY" || "$date" == "$TODAY" ]]; then
+              TARGET="$hash"
+              COMMITS="${COMMITS}- ${msg}\n"
+            fi
+          done < <(git log origin/main..origin/dev --reverse --format="%H %as %s")
+
+          if [ -z "$TARGET" ]; then
+            echo "No new commits to release today"
+            exit 0
+          fi
+
+          # Check if a release branch already exists for today
+          BRANCH="release/$TODAY"
+          if git rev-parse --verify "origin/$BRANCH" &>/dev/null; then
+            echo "Release branch $BRANCH already exists, updating..."
+            git push origin --delete "$BRANCH" 2>/dev/null || true
+          fi
+
+          # Create release branch pointing at the target commit
+          git checkout -B "$BRANCH" "$TARGET"
+          git push origin "$BRANCH"
+
+          # Check if PR already exists
+          existing=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number')
+
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "Release $TODAY" \
+              --assignee jhasiddhant \
+              --reviewer jhasiddhant \
+              --body "## Commits included
+
+          $(echo -e "$COMMITS")
+
+          Merge this PR to release today's changes to main."
+            echo "✅ Created PR for $TODAY"
+          else
+            echo "PR #$existing already exists for $TODAY, updating branch..."
+          fi
