@@ -4,6 +4,7 @@
 
 import os
 import json
+import shutil
 from typing import Optional
 
 try:
@@ -217,7 +218,8 @@ $response = Invoke-RestMethod -Uri "https://api.fabric.microsoft.com/v1/workspac
 $ws = $response.value | Where-Object {{ $_.displayName -eq '{workspace_name.replace("'", "''")}' }} | Select-Object -First 1
 if ($ws) {{ Write-Output $ws.id }} else {{ Write-Error "WORKSPACE_NOT_FOUND: {workspace_name}" }}
 """
-    result = run_command(["powershell.exe", "-ExecutionPolicy", "Bypass", "-Command", script_content])
+    ps_executable = "pwsh" if shutil.which("pwsh") else "powershell"
+    result = run_command([ps_executable, "-ExecutionPolicy", "Bypass", "-Command", script_content])
     result = result.strip()
     if "WORKSPACE_NOT_FOUND" in result or "AUTH_FAILED" in result or "ERROR" in result.upper():
         return "", result
