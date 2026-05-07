@@ -14,8 +14,8 @@ from typing import Dict, Tuple, Optional, Any
 # CONSTANTS - Error Detection
 # ============================================================================
 
-# Keywords that indicate deployment/operation failures
-ERROR_KEYWORDS = ["Error", "error", "FAILED", "Failed", "failed"]
+# Keywords that indicate deployment/operation failures (all lowercase, used with .lower())
+ERROR_KEYWORDS = ["error", "failed"]
 
 # Azure-specific error patterns with user-friendly messages and solutions
 AZURE_ERROR_PATTERNS = {
@@ -594,16 +594,22 @@ def get_rg_location(resource_group: str) -> str:
     try:
         res = run_command(["az", "group", "show", "-n", resource_group, "--query", "location", "-o", "tsv"])
         return res.strip()
-    except:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return "eastus"
 
 
 def get_vnet_subnets(resource_group: str, vnet_name: str) -> list[dict]:
     """Gets existing subnets in a VNet with their address prefixes."""
     try:
-        cmd = f'az network vnet subnet list -g "{resource_group}" --vnet-name "{vnet_name}" --query "[].{{name:name, addressPrefix:addressPrefix}}" -o json'
+        cmd = [
+            "az", "network", "vnet", "subnet", "list",
+            "-g", resource_group,
+            "--vnet-name", vnet_name,
+            "--query", "[].{name:name, addressPrefix:addressPrefix}",
+            "-o", "json"
+        ]
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=60
+            cmd, capture_output=True, text=True, timeout=60
         )
         
         if result.returncode == 0 and result.stdout.strip():
@@ -617,9 +623,15 @@ def get_vnet_subnets(resource_group: str, vnet_name: str) -> list[dict]:
 def calculate_next_subnet_address(resource_group: str, vnet_name: str, subnet_size: int = 27) -> Optional[str]:
     """Calculates the next available subnet starting address based on existing subnets."""
     try:
-        cmd = f'az network vnet show -g "{resource_group}" -n "{vnet_name}" --query "addressSpace.addressPrefixes[0]" -o tsv'
+        cmd = [
+            "az", "network", "vnet", "show",
+            "-g", resource_group,
+            "-n", vnet_name,
+            "--query", "addressSpace.addressPrefixes[0]",
+            "-o", "tsv"
+        ]
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=60
+            cmd, capture_output=True, text=True, timeout=60
         )
         
         if result.returncode != 0 or not result.stdout.strip():
@@ -736,7 +748,7 @@ def get_resource_id(resource_group: str, resource_type: str, parameters: Dict[st
             "--query", "id", "-o", "tsv"
         ]
         return run_command(cmd).strip()
-    except:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
 
 
@@ -1169,13 +1181,14 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
     return "\n".join(details)
 
 
-def parse_bicep_parameters(template_path: str) -> Dict[str, Tuple[bool, Optional[str]]]:
+def parse_bicep_parameters(template_path: str) -> Tuple[Dict[str, Tuple[bool, Optional[str]]], Dict[str, dict]]:
     """Parse bicep template to extract parameters, @allowed values, @description, and constraints.
     
-    Returns dict of param_name -> (required: bool, default_value: str|None)
-    Also stores extended info in PARAM_METADATA for allowed values and descriptions.
+    Returns tuple of:
+        - params: dict of param_name -> (required: bool, default_value: str|None)
+        - metadata: dict of param_name -> constraint info (allowed values, descriptions, etc.)
     """
-    global PARAM_METADATA
+    param_metadata: Dict[str, dict] = {}
     params: Dict[str, Tuple[bool, Optional[str]]] = {}
     try:
         with open(template_path, 'r', encoding='utf-8') as f:
@@ -1251,7 +1264,7 @@ def parse_bicep_parameters(template_path: str) -> Dict[str, Tuple[bool, Optional
                     params[name] = (required, default_raw)
                     
                     # Store extended metadata
-                    PARAM_METADATA[name] = {
+                    param_metadata[name] = {
                         'allowed': allowed_values,
                         'description': description,
                         'min_length': min_length,
@@ -1262,11 +1275,7 @@ def parse_bicep_parameters(template_path: str) -> Dict[str, Tuple[bool, Optional
             i += 1
     except Exception:
         pass
-    return params
-
-
-# Global metadata storage for parameter constraints parsed from Bicep templates
-PARAM_METADATA: Dict[str, dict] = {}
+    return params, param_metadata
 
 
 def validate_bicep_parameters(resource_type: str, provided: Dict[str, str]) -> Tuple[bool, str, Dict[str, Tuple[bool, Optional[str]]]]:
@@ -1283,7 +1292,7 @@ def validate_bicep_parameters(resource_type: str, provided: Dict[str, str]) -> T
     template_path = get_template_path(TEMPLATE_MAP[resource_type])
     if not os.path.exists(template_path):
         return False, f"Template not found at {template_path}", {}
-    params = parse_bicep_parameters(template_path)
+    params, param_metadata = parse_bicep_parameters(template_path)
     
     auto_calculated = []
     # Fabric capacity location is auto-detected from tenant region
@@ -1297,8 +1306,8 @@ def validate_bicep_parameters(resource_type: str, provided: Dict[str, str]) -> T
     # Validate @allowed values
     invalid_values = []
     for param_name, value in provided.items():
-        if param_name in PARAM_METADATA and value not in (None, ""):
-            meta = PARAM_METADATA[param_name]
+        if param_name in param_metadata and value not in (None, ""):
+            meta = param_metadata[param_name]
             allowed = meta.get('allowed', [])
             if allowed and str(value).strip("'\"") not in allowed:
                 invalid_values.append(
@@ -1398,8 +1407,9 @@ def deploy_bicep(resource_group: str, resource_type: str, parameters: Dict[str, 
                 container_script = OP_SCRIPTS.get("create-funcapp-containers")
                 if container_script:
                     container_script_path = os.path.join(os.path.dirname(__file__), "scripts", container_script)
+                    ps_executable = "pwsh" if shutil.which("pwsh") else "powershell"
                     container_cmd = [
-                        "powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                        ps_executable, "-ExecutionPolicy", "Bypass", "-File",
                         container_script_path,
                         "-StorageAccountName", storage_account_name,
                         "-ResourceGroup", resource_group
