@@ -7,8 +7,7 @@ import re
 import json
 import shutil
 import subprocess
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict
 
 try:
     from .utils import (
@@ -16,7 +15,7 @@ try:
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
         NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
-        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP, PARAM_METADATA,
+        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP,
         RESOURCE_VARIANTS
     )
 except ImportError:
@@ -25,7 +24,7 @@ except ImportError:
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
         NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
-        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP, PARAM_METADATA,
+        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP,
         RESOURCE_VARIANTS
     )
 
@@ -544,7 +543,7 @@ def attach_to_nsp(resource_group: str, nsp_name: str = None, resource_id: str = 
     
     try:
         check_data = json.loads(check_result)
-    except:
+    except (json.JSONDecodeError, ValueError):
         return f"Error: Failed to parse NSP check result:\n{check_result}"
     
     if check_data.get("count", 0) == 0:
@@ -636,7 +635,7 @@ def attach_diagnostic_settings(resource_group: str, workspace_id: str = None, re
     
     try:
         check_data = json.loads(check_result)
-    except:
+    except (json.JSONDecodeError, ValueError):
         return f"Error: Failed to parse Log Analytics check result:\n{check_result}"
     
     workspace_name = None
@@ -664,7 +663,7 @@ def attach_diagnostic_settings(resource_group: str, workspace_id: str = None, re
             resources_new = check_data_new.get("resources", [])
             if resources_new:
                 workspace_id = resources_new[0].get("id")
-        except:
+        except (json.JSONDecodeError, ValueError):
             return "\n".join(output) + "\n\nError: Could not retrieve workspace ID after creation"
     else:
         resources = check_data.get("resources", [])
@@ -1342,7 +1341,7 @@ def get_bicep_requirements(resource_type: str) -> str:
         return f"Unknown resource_type. Valid: {', '.join(sorted(TEMPLATE_MAP.keys()))}"
     
     template_path = get_template_path(TEMPLATE_MAP[resource_type])
-    params = parse_bicep_parameters(template_path)
+    params, param_metadata = parse_bicep_parameters(template_path)
     
     auto_calculated = []
     if resource_type == "fabric-capacity":
@@ -1365,7 +1364,7 @@ def get_bicep_requirements(resource_type: str) -> str:
     for param in required:
         desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
         response.append(f"  {param:<28} {desc:<30} {example}")
-        meta = PARAM_METADATA.get(param, {})
+        meta = param_metadata.get(param, {})
         allowed = meta.get('allowed', [])
         if allowed:
             response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
@@ -1382,7 +1381,7 @@ def get_bicep_requirements(resource_type: str) -> str:
             desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
             default_str = str(default) if default else "-"
             response.append(f"  {param:<28} {default_str:<15} {example}")
-            meta = PARAM_METADATA.get(param, {})
+            meta = param_metadata.get(param, {})
             allowed = meta.get('allowed', [])
             if allowed:
                 response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
@@ -1430,7 +1429,7 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
             return f"Error: Invalid JSON in parameters: {parameters}"
     
     template_path = get_template_path(TEMPLATE_MAP[resource_type])
-    template_params = parse_bicep_parameters(template_path)
+    template_params, param_metadata = parse_bicep_parameters(template_path)
     
     auto_calculated = []
     if resource_type == "fabric-capacity":
@@ -1471,7 +1470,7 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
         params_to_show = required_params if not resource_group else all_missing
         for param in params_to_show:
             desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
-            meta = PARAM_METADATA.get(param, {})
+            meta = param_metadata.get(param, {})
             allowed = meta.get('allowed', [])
             response.append(f"  {param:<28} {desc:<30} {example}")
             if allowed:
@@ -1504,7 +1503,7 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
                 desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
                 default_str = str(default) if default else "-"
                 response.append(f"  {param:<28} {default_str:<15} {example}")
-                meta = PARAM_METADATA.get(param, {})
+                meta = param_metadata.get(param, {})
                 allowed = meta.get('allowed', [])
                 if allowed:
                     response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
@@ -1546,6 +1545,10 @@ def deploy_bicep_resource(resource_group: str, resource_type: str, parameters: d
     
     ok, msg, parsed_params = validate_bicep_parameters(resource_type, parameters)
     if not ok:
+        # Get metadata for showing allowed values in error messages
+        template_path = get_template_path(TEMPLATE_MAP[resource_type])
+        _, param_metadata = parse_bicep_parameters(template_path)
+        
         response = []
         response.append("=" * 70)
         response.append(f"  CANNOT DEPLOY {resource_type.upper()} - PARAMETERS NEEDED")
@@ -1570,7 +1573,7 @@ def deploy_bicep_resource(resource_group: str, resource_type: str, parameters: d
             response.append("  MISSING REQUIRED PARAMETERS:")
             response.append("-" * 70)
             for param in missing:
-                meta = PARAM_METADATA.get(param, {})
+                meta = param_metadata.get(param, {})
                 desc = meta.get('description', param)
                 allowed = meta.get('allowed', [])
                 response.append(f"    {param}: {desc}")
