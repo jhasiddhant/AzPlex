@@ -2,6 +2,8 @@
 # GENERAL FUNCTIONS - User identity and instructions
 # ============================================================================
 
+import json
+
 try:
     from .utils import run_powershell_script, get_script_path, load_agent_instructions
 except ImportError:

@@ -394,32 +394,34 @@ def azure_set_subscription(subscription_id: str = None, subscription_name: str =
 
 
 @mcp.tool()
-def azure_manage_resource(
-    action: str = None,
+def azure_update_tags(
     resource_id: str = None,
     resource_name: str = None,
     resource_group: str = None,
     resource_type: str = None,
     tags: str = None,
-    tag_operation: str = "merge"
+    operation: str = "merge"
 ) -> str:
     """
-    Perform lifecycle or modification actions on an Azure resource.
-    Supports: start, stop, restart, deallocate, update-tags.
-
+    Adds, updates, or replaces tags on an Azure resource.
+    
+    IMPORTANT: Before calling this tool, ask the user for:
+    1. The resource to tag (resource_id OR resource_name + resource_group)
+    2. The tag key-value pairs in format: "key1=value1,key2=value2"
+    3. Whether to merge with existing tags or replace all tags
+    
     Args:
-        action: The action to perform - one of: start, stop, restart, deallocate, update-tags
-        resource_id: Full ARM resource ID (preferred if available)
-        resource_name: Resource name (requires resource_group + resource_type)
+        resource_id: Full resource ID (preferred if available)
+        resource_name: Resource name (requires resource_group)
         resource_group: Resource group name
-        resource_type: Resource type short name (vm, webapp, aks, storage-account, etc.)
-        tags: For update-tags action only - tags in format "key1=value1,key2=value2"
-        tag_operation: For update-tags action only - "merge" (default) or "replace"
-
+        resource_type: Resource type short name (nsg, vnet, kv, storage-account, etc.)
+        tags: Tag in format "key1=value1,key2=value2"
+        operation: "merge" (add/update, keep existing) or "replace" (remove all existing, set new)
+    
     Returns:
-        Action result or error
+        Tag update status
     """
-    return azure.manage_resource(action, resource_id, resource_name, resource_group, resource_type, tags, tag_operation)
+    return azure.update_tags(resource_id, resource_name, resource_group, resource_type, tags, operation)
 
 
 @mcp.tool()
@@ -462,6 +464,22 @@ def azure_create_resource_group(resource_group_name: str, region: str, project_n
 # ============================================================================
 # AZURE TOOLS - Compliance (NSP & Diagnostics)
 # ============================================================================
+
+@mcp.tool()
+def azure_check_resource(resource_group: str, resource_type: str) -> str:
+    """
+    Checks for specific resource types in a resource group.
+    Returns a list of resources found, or indicates if none exist.
+    
+    Args:
+        resource_group: Resource group name to check
+        resource_type: Type of resource to check (nsp, network-security-perimeter, log-analytics, storage-account, key-vault, openai, ai-search, cosmos-db, sql-db, fabric-capacity, uami)
+    
+    Returns:
+        JSON string with resource information
+    """
+    return azure.check_resource(resource_group, resource_type)
+
 
 @mcp.tool()
 def azure_attach_to_nsp(resource_group: str, nsp_name: str = None, resource_id: str = None) -> str:
@@ -553,6 +571,18 @@ def azure_attach_appinsights(
 # ============================================================================
 
 @mcp.tool()
+def azure_get_bicep_requirements(resource_type: str) -> str:
+    """(Bicep Path) Returns required/optional params for a Bicep template.
+    
+    IMPORTANT: For resources with hosting variants, always use the BASE type first:
+    - For function apps: use 'function-app' (NOT 'function-app-flex' or 'function-app-appserviceplan')
+    This returns the available hosting options for the user to choose from.
+    Only use the specific variant AFTER the user has explicitly chosen one.
+    """
+    return azure.get_bicep_requirements(resource_type)
+
+
+@mcp.tool()
 def azure_create_resource(resource_type: str, resource_group: str = None, parameters: str = None) -> str:
     """Interactive Azure resource creation using Bicep templates.
     
@@ -561,20 +591,13 @@ def azure_create_resource(resource_type: str, resource_group: str = None, parame
     This returns the available hosting options for the user to choose from.
     Only use the specific variant AFTER the user has explicitly chosen one.
     
-    Supports all Bicep-templated resources including:
-    - container-app / aca (auto-detects/creates environment)
-    - container-apps-env / aca-env (auto-discovers Log Analytics)
-    - data-collection-endpoint / dce
-    - data-collection-rule / dcr (with custom table creation)
-    - storage-account, key-vault, function-app, vnet, nsg, etc.
-    
     Args:
-        resource_type: Type of resource to create (e.g. storage-account, key-vault, container-app, dce, dcr, etc.)
+        resource_type: Type of resource to create (e.g. storage-account, key-vault, function-app, etc.)
         resource_group: Azure resource group name
         parameters: JSON string of resource-specific parameters
     
     Returns:
-        Deployment status with resource details, or parameter prompt if info is missing
+        Deployment status with resource details
     """
     return azure.create_resource(resource_type, resource_group, parameters)
 
@@ -763,8 +786,264 @@ def azure_integrate_vnet(
 
 
 # ============================================================================
-# DCE-DCR ATTACHMENT
+# CONTAINER APPS TOOLS
 # ============================================================================
+
+@mcp.tool()
+def azure_create_container_apps_env(
+    resource_group: str = None,
+    environment_name: str = None,
+    subnet_id: str = None,
+    zone_redundant: bool = False,
+    workload_profile_type: str = "Consumption",
+    internal_only: bool = False
+) -> str:
+    """
+    Creates a Container Apps Environment with optional VNet integration.
+    
+    PREREQUISITES:
+    - Resource Group must exist (environment uses SAME REGION as RG automatically)
+    - For VNet mode: VNet and subnet must exist
+    
+    REQUIRED INFORMATION (ask user):
+    1. resource_group: Target resource group
+    2. environment_name: Name for the environment
+    
+    Args:
+        resource_group: Resource group name (environment deployed in same region)
+        environment_name: Name for the Container Apps Environment
+        subnet_id: Optional - Full subnet resource ID for VNet integration.
+            If omitted, uses Azure-managed networking. Format:
+            /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
+        zone_redundant: Enable zone redundancy (default: False)
+        workload_profile_type: Consumption, D4, D8, D16, D32, E4, E8, E16, E32 (default: Consumption)
+        internal_only: No public ingress - internal VNet access only (default: False)
+    
+    Returns:
+        Deployment result with environment details
+    
+    Examples:
+        # Basic environment without VNet (Azure-managed networking)
+        azure_create_container_apps_env(
+            resource_group='my-rg',
+            environment_name='my-aca-env'
+        )
+        
+        # Environment with VNet integration
+        azure_create_container_apps_env(
+            resource_group='my-rg',
+            environment_name='my-aca-env',
+            subnet_id='/subscriptions/xxx/resourceGroups/network-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/aca-subnet'
+        )
+        
+        # Zone-redundant with dedicated workload profile
+        azure_create_container_apps_env(
+            resource_group='my-rg',
+            environment_name='my-aca-env',
+            subnet_id='/subscriptions/xxx/.../subnets/aca-subnet',
+            zone_redundant=True,
+            workload_profile_type='D4'
+        )
+    """
+    return azure.create_container_apps_environment(
+        resource_group=resource_group,
+        environment_name=environment_name,
+        subnet_id=subnet_id,
+        log_analytics_workspace_id=None,
+        zone_redundant=zone_redundant,
+        workload_profile_type=workload_profile_type,
+        internal_only=internal_only
+    )
+
+
+@mcp.tool()
+def azure_create_container_app(
+    resource_group: str = None,
+    container_app_name: str = None,
+    environment_name: str = None,
+    target_port: int = 80,
+    external_ingress: bool = True,
+    cpu: str = "0.5",
+    memory: str = "1Gi",
+    min_replicas: int = 0,
+    max_replicas: int = 10,
+    subnet_id: str = None
+) -> str:
+    """
+    Creates a Container App using the default quickstart image. Auto-creates environment if none exists.
+    
+    ENVIRONMENT AUTO-DETECTION & AUTO-CREATION:
+    - If environment_name not provided, tool finds existing environment in the RG
+    - If no environment exists, one is automatically created
+    - Use subnet_id to specify VNet integration when auto-creating environment
+    
+    Args:
+        resource_group: Resource group containing the Container Apps Environment
+        container_app_name: Name for the Container App (2-32 chars)
+        environment_name: Existing environment name (auto-detected/created if not provided)
+        target_port: Port the container listens on (default: 80)
+        external_ingress: Enable public access (default: True)
+        cpu: CPU cores - 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 4 (default: 0.5)
+        memory: Memory - 0.5Gi, 1Gi, 1.5Gi, 2Gi, 3Gi, 3.5Gi, 4Gi, 8Gi (default: 1Gi)
+        min_replicas: Minimum replicas, 0 for scale-to-zero (default: 0)
+        max_replicas: Maximum replicas (default: 10)
+        subnet_id: Optional - subnet for VNet integration when auto-creating environment
+    
+    Returns:
+        Deployment result with Container App details and FQDN
+    
+    Examples:
+        # Basic container app with default image
+        azure_create_container_app(
+            resource_group='my-rg',
+            container_app_name='hello-app'
+        )
+        
+        # Auto-create environment with VNet when none exists
+        azure_create_container_app(
+            resource_group='my-rg',
+            container_app_name='hello-app',
+            subnet_id='/subscriptions/xxx/.../subnets/aca-subnet'
+        )
+        
+        # With custom configuration
+        azure_create_container_app(
+            resource_group='my-rg',
+            container_app_name='my-worker',
+            target_port=8080,
+            cpu='1',
+            memory='2Gi',
+            min_replicas=1,
+            max_replicas=5
+        )
+    """
+    return azure.create_container_app(
+        resource_group=resource_group,
+        container_app_name=container_app_name,
+        environment_name=environment_name,
+        target_port=target_port,
+        external_ingress=external_ingress,
+        cpu=cpu,
+        memory=memory,
+        min_replicas=min_replicas,
+        max_replicas=max_replicas,
+        subnet_id=subnet_id
+    )
+
+
+# ============================================================================
+# DATA COLLECTION ENDPOINT & DATA COLLECTION RULE TOOLS
+# ============================================================================
+
+@mcp.tool()
+def azure_create_data_collection_endpoint(
+    resource_group: str = None,
+    dce_name: str = None,
+    public_network_access: str = "Enabled",
+    description: str = ""
+) -> str:
+    """
+    Creates a Data Collection Endpoint (DCE) for Azure Monitor.
+    
+    DCE is REQUIRED for:
+    - Logs Ingestion API (custom logs)
+    - Azure Monitor Private Link Scope (AMPLS)
+    - VNet-isolated data ingestion
+    
+    CREATE ORDER: DCE must be created BEFORE DCR.
+    
+    Args:
+        resource_group: Target resource group
+        dce_name: Name for the Data Collection Endpoint
+        public_network_access: Enabled (default), Disabled, or SecuredByPerimeter
+        description: Optional description
+    
+    Returns:
+        Deployment result with DCE ID, endpoints (logs, metrics, config)
+    
+    Example:
+        azure_create_data_collection_endpoint(
+            resource_group='monitoring-rg',
+            dce_name='my-dce'
+        )
+    """
+    return azure.create_data_collection_endpoint(
+        resource_group=resource_group,
+        dce_name=dce_name,
+        public_network_access=public_network_access,
+        description=description
+    )
+
+
+@mcp.tool()
+def azure_create_data_collection_rule(
+    resource_group: str = None,
+    dcr_name: str = None,
+    workspace_name: str = None,
+    dce_name: str = None,
+    custom_table_base_name: str = None,
+    table_columns: list = None,
+    create_table: bool = True,
+    workspace_resource_group: str = None,
+    dce_resource_group: str = None,
+    retention_in_days: int = 90,
+    total_retention_in_days: int = 180
+) -> str:
+    """
+    Creates a Data Collection Rule (DCR) with optional custom Log Analytics table.
+    
+    PREREQUISITES:
+    1. Log Analytics Workspace must exist
+    2. Data Collection Endpoint (DCE) must exist - create with azure_create_data_collection_endpoint first
+    
+    CREATE ORDER: DCE → DCR → (optional) attach via azure_attach_dce_to_dcr
+    
+    Args:
+        resource_group: Resource group for the DCR
+        dcr_name: Name for the Data Collection Rule
+        workspace_name: Existing Log Analytics workspace name
+        dce_name: Existing Data Collection Endpoint name
+        custom_table_base_name: Base name for custom table (e.g., 'MyLogs' creates 'MyLogs_CL')
+        table_columns: Column definitions as list. Default: [TimeGenerated, Message]
+            Format: [{"name": "ColumnName", "type": "string|dateTime|int|..."}]
+        create_table: Create the custom table (default: True)
+        workspace_resource_group: RG containing workspace (defaults to resource_group)
+        dce_resource_group: RG containing DCE (defaults to resource_group)
+        retention_in_days: Interactive retention days (default: 90)
+        total_retention_in_days: Total retention including archive (default: 180)
+    
+    Returns:
+        Deployment result with DCR ID, immutable ID, table name, stream name
+    
+    Example:
+        azure_create_data_collection_rule(
+            resource_group='monitoring-rg',
+            dcr_name='my-dcr',
+            workspace_name='my-law',
+            dce_name='my-dce',
+            custom_table_base_name='MyCustomLogs',
+            table_columns=[
+                {"name": "TimeGenerated", "type": "dateTime"},
+                {"name": "RunID", "type": "string"},
+                {"name": "Status", "type": "string"},
+                {"name": "Message", "type": "string"}
+            ]
+        )
+    """
+    return azure.create_data_collection_rule(
+        resource_group=resource_group,
+        dcr_name=dcr_name,
+        workspace_name=workspace_name,
+        dce_name=dce_name,
+        custom_table_base_name=custom_table_base_name,
+        table_columns=table_columns,
+        create_table=create_table,
+        workspace_resource_group=workspace_resource_group,
+        dce_resource_group=dce_resource_group,
+        retention_in_days=retention_in_days,
+        total_retention_in_days=total_retention_in_days
+    )
+
 
 @mcp.tool()
 def azure_attach_dce_to_dcr(
@@ -1074,18 +1353,47 @@ def ado_create_branch(organization: str = None, project_name: str = None,
 # ============================================================================
 
 @mcp.tool()
+def ado_deploy_custom_yaml(organization: str, project_name: str, repo_name: str,
+                           branch: str, file_name: str, yaml_content: str,
+                           folder_path: str = "pipelines") -> str:
+    """
+    Deploys custom YAML content directly to an Azure DevOps repository.
+    Use this when you have YAML content to deploy (not using templates).
+    
+    Args:
+        organization: Azure DevOps organization URL (required)
+        project_name: Existing project name (required)
+        repo_name: Existing repository name (required)
+        branch: Branch to deploy to (required, e.g., 'main', 'dev')
+        file_name: Target filename/display name for the YAML file (required, e.g., 'sourcebranchvalidation.yml')
+        yaml_content: The actual YAML content to deploy (required - paste full YAML here)
+        folder_path: Folder in repo for YAML (defaults to 'pipelines')
+    
+    Returns:
+        Deployment status and YAML location
+    """
+    return ado.deploy_custom_yaml(organization, project_name, repo_name, branch, file_name, yaml_content, folder_path)
+
+
+@mcp.tool()
 def ado_deploy_pipeline_yaml(organization: str = None, project_name: str = None, 
                         repo_name: str = None, pipeline_type: str = None,
                         branch: str = None, folder_path: str = None,
                         custom_yaml_content: str = None, yaml_file_name: str = None) -> str:
     """
-    Deploys a pipeline YAML template or custom YAML content to an Azure DevOps repository.
+    Deploys a pipeline YAML template from agent/templates OR custom YAML content to an Azure DevOps repository.
     
     Workflow:
-    1. If custom_yaml_content provided → deploys custom YAML directly
+    1. If custom_yaml_content provided → deploys custom YAML
     2. If pipeline_type matches PIPELINE_TEMPLATE_MAP entry → uses that template
     3. Otherwise → prompts for custom YAML content
     4. Clones repo, copies YAML to specified folder, commits and pushes
+    
+    Template Management (Similar to Bicep TEMPLATE_MAP):
+    - Templates are mapped in PIPELINE_TEMPLATE_MAP (see server.py)
+    - To add new templates:
+      1. Add .yml file to agent/templates/
+      2. Add entry to PIPELINE_TEMPLATE_MAP: "template-key": "templates/YourTemplate.yml"
     
     Available Templates:
     - codeql: CodeQL_Pipeline.yml (standard non-production)
@@ -1177,204 +1485,6 @@ def ado_assign_role(
         Role assignment result with status and details
     """
     return ado.assign_role(organization, project_name, role_name, principal_id)
-
-
-# ============================================================================
-# IDENTITY & LOOKUP
-# ============================================================================
-
-@mcp.tool()
-def azure_lookup_identity(identifier: str, identity_type: str = None) -> str:
-    """
-    Look up an Azure AD identity (user, group, or service principal) by email, display name, or app name.
-    Returns Object ID and details. Useful before assigning RBAC/PIM roles.
-
-    Args:
-        identifier: Email address, display name, or app name to search for
-        identity_type: Optional filter - 'user', 'group', or 'serviceprincipal'
-
-    Returns:
-        Identity details including Object ID
-    """
-    return azure.lookup_identity(identifier, identity_type)
-
-
-# ============================================================================
-# DELETE OPERATIONS
-# ============================================================================
-
-@mcp.tool()
-def azure_delete_resource(resource_id: str = None, resource_name: str = None,
-                          resource_group: str = None, resource_type: str = None) -> str:
-    """
-    Delete an Azure resource. Provide either the full resource_id OR resource_name + resource_group + resource_type.
-
-    Args:
-        resource_id: Full ARM resource ID (alternative to name-based lookup)
-        resource_name: Name of the resource
-        resource_group: Resource group containing the resource
-        resource_type: Type key (e.g., 'storage-account', 'key-vault')
-
-    Returns:
-        Deletion confirmation or error
-    """
-    return azure.delete_resource(resource_id, resource_name, resource_group, resource_type)
-
-
-@mcp.tool()
-def azure_delete_resource_group(resource_group: str) -> str:
-    """
-    Delete an Azure resource group and all resources within it. This is irreversible.
-
-    Args:
-        resource_group: Name of the resource group to delete
-
-    Returns:
-        Deletion status
-    """
-    return azure.delete_resource_group(resource_group)
-
-
-@mcp.tool()
-def ado_delete_repo(organization: str = None, project_name: str = None, repo_name: str = None) -> str:
-    """
-    Delete an Azure DevOps Git repository. This is irreversible.
-
-    Args:
-        organization: Azure DevOps organization URL or name
-        project_name: Project containing the repository
-        repo_name: Name of the repository to delete
-
-    Returns:
-        Deletion confirmation or error
-    """
-    return ado.delete_repo(organization, project_name, repo_name)
-
-
-# ============================================================================
-# PIM DEACTIVATION
-# ============================================================================
-
-@mcp.tool()
-def azure_deactivate_pim_role(subscription_name: str = None, role_name: str = None,
-                              resource_group_name: str = None) -> str:
-    """
-    Deactivate an active PIM (Privileged Identity Management) role assignment.
-
-    Args:
-        subscription_name: Subscription scope for the role
-        role_name: Name of the role to deactivate
-        resource_group_name: Optional resource group scope
-
-    Returns:
-        Deactivation result
-    """
-    return azure.deactivate_pim_role(subscription_name, role_name, resource_group_name)
-
-
-# ============================================================================
-# PIPELINE TRIGGER
-# ============================================================================
-
-@mcp.tool()
-def ado_trigger_pipeline(organization: str = None, project_name: str = None,
-                         pipeline_name: str = None, pipeline_id: str = None,
-                         branch: str = "main") -> str:
-    """
-    Trigger/run an existing Azure DevOps pipeline.
-
-    Args:
-        organization: Azure DevOps organization URL or name
-        project_name: Project containing the pipeline
-        pipeline_name: Name of the pipeline (alternative to pipeline_id)
-        pipeline_id: ID of the pipeline (alternative to pipeline_name)
-        branch: Branch to run on (default: main)
-
-    Returns:
-        Run ID, status, and URL
-    """
-    return ado.trigger_pipeline(organization, project_name, pipeline_name, pipeline_id, branch)
-
-
-# ============================================================================
-# ADO WORK ITEMS
-# ============================================================================
-
-@mcp.tool()
-def ado_manage_work_item(
-    organization: str = None,
-    project_name: str = None,
-    action: str = None,
-    work_item_id: int = None,
-    work_item_type: str = None,
-    title: str = None,
-    fields: str = None,
-    comment: str = None
-) -> str:
-    """
-    Create, read, update, or comment on Azure DevOps work items.
-
-    Actions:
-      - create: Create a new work item (requires work_item_type + title)
-      - read: Get full details of a work item (requires work_item_id)
-      - update: Update fields on a work item (requires work_item_id + fields or title)
-      - add-comment: Add a discussion comment (requires work_item_id + comment)
-
-    Args:
-        organization: Azure DevOps organization URL or name
-        project_name: Project name
-        action: One of: create, read, update, add-comment
-        work_item_id: ID of existing work item (for read/update/add-comment)
-        work_item_type: Type for create (Task, Bug, User Story, Epic, Feature)
-        title: Title for create or update
-        fields: Comma-separated key=value pairs for field updates. Keys can be friendly
-                names: state, assigned_to, area_path, iteration_path, priority, activity,
-                completed_work, remaining_work, original_estimate, start_date, target_date,
-                story_points, effort, tags, description, severity, value_area
-        comment: Discussion comment text (for add-comment action)
-
-    Returns:
-        Work item details, creation confirmation, or update status
-    """
-    return ado.manage_work_item(organization, project_name, action, work_item_id,
-                                work_item_type, title, fields, comment)
-
-
-# ============================================================================
-# LOG ANALYTICS
-# ============================================================================
-
-@mcp.tool()
-def azure_query_logs(workspace_name: str = None, resource_group: str = None,
-                     query: str = None, timespan: str = "P1D") -> str:
-    """
-    Run a KQL query against a Log Analytics workspace.
-
-    Args:
-        workspace_name: Name of the Log Analytics workspace
-        resource_group: Resource group of the workspace (optional)
-        query: KQL query string
-        timespan: ISO 8601 duration for query time range (default: P1D = 1 day)
-
-    Returns:
-        Query results as JSON
-    """
-    return azure.query_logs(workspace_name, resource_group, query, timespan)
-
-
-# ============================================================================
-# FABRIC WORKSPACES
-# ============================================================================
-
-@mcp.tool()
-def fabric_list_workspaces() -> str:
-    """
-    List all Microsoft Fabric workspaces accessible to the current user.
-
-    Returns:
-        List of workspaces with IDs and capacity info
-    """
-    return fabric.list_workspaces()
 
 
 # ============================================================================
