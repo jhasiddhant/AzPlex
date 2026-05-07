@@ -7,26 +7,20 @@ import re
 import json
 import shutil
 import subprocess
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Tuple
 
 try:
     from .utils import (
         run_command, run_powershell_script, get_script_path, get_template_path,
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
-        NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
-        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP, PARAM_METADATA,
-        RESOURCE_VARIANTS
+        PRIVATE_DNS_ZONE_MAP, RESOURCE_VARIANTS
     )
 except ImportError:
     from utils import (
         run_command, run_powershell_script, get_script_path, get_template_path,
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
-        NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
-        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP, PARAM_METADATA,
-        RESOURCE_VARIANTS
+        PRIVATE_DNS_ZONE_MAP, RESOURCE_VARIANTS
     )
 
 
@@ -351,33 +345,90 @@ def query_resources(
         })
 
 
-def update_tags(
+def manage_resource(
+    action: str,
     resource_id: str = None,
     resource_name: str = None,
     resource_group: str = None,
     resource_type: str = None,
     tags: str = None,
-    operation: str = "merge"
+    tag_operation: str = "merge"
 ) -> str:
-    """Adds, updates, or replaces tags on an Azure resource."""
-    if not tags:
-        return json.dumps({"error": "tags parameter is required in format 'key1=value1,key2=value2'"})
+    """Perform lifecycle or modification actions on an Azure resource."""
+    VALID_ACTIONS = ["start", "stop", "restart", "deallocate", "update-tags"]
     
+    if not action:
+        return f"Error: action is required. Valid actions: {', '.join(VALID_ACTIONS)}"
+    action = action.lower().strip()
+    if action not in VALID_ACTIONS:
+        return f"Error: Invalid action '{action}'. Valid actions: {', '.join(VALID_ACTIONS)}"
+    
+    # --- update-tags branch (delegates to PowerShell script) ---
+    if action == "update-tags":
+        if not tags:
+            return "Error: tags parameter is required in format 'key1=value1,key2=value2'"
+        if not resource_id and not (resource_name and resource_group):
+            return "Error: Either resource_id OR (resource_name + resource_group) is required"
+        params = {"Tags": tags, "Operation": tag_operation}
+        if resource_id:
+            params["ResourceId"] = resource_id
+        if resource_name:
+            params["ResourceName"] = resource_name
+        if resource_group:
+            params["ResourceGroup"] = resource_group
+        if resource_type:
+            params["ResourceType"] = resource_type
+        script_path = get_script_path("update-tags.ps1")
+        return run_powershell_script(script_path, params)
+    
+    # --- lifecycle actions (start/stop/restart/deallocate) ---
     if not resource_id and not (resource_name and resource_group):
-        return json.dumps({"error": "Either resource_id OR (resource_name + resource_group) is required"})
+        return "Error: Either resource_id OR (resource_name + resource_group + resource_type) is required"
     
-    params = {"Tags": tags, "Operation": operation}
+    # Build the resource ID if not provided
     if resource_id:
-        params["ResourceId"] = resource_id
-    if resource_name:
-        params["ResourceName"] = resource_name
-    if resource_group:
-        params["ResourceGroup"] = resource_group
-    if resource_type:
-        params["ResourceType"] = resource_type
+        target = resource_id
+    else:
+        if not resource_type:
+            return "Error: resource_type is required when using resource_name + resource_group"
+        provider = RESOURCE_TYPE_PROVIDER_MAP.get(resource_type.lower())
+        if not provider:
+            return f"Error: Unknown resource_type '{resource_type}'. Valid types: {', '.join(sorted(RESOURCE_TYPE_PROVIDER_MAP.keys()))}"
+        # Get the resource ID via az resource show
+        show_cmd = ["az", "resource", "show", "-g", resource_group,
+                    "-n", resource_name, "--resource-type", provider,
+                    "--query", "id", "-o", "tsv"]
+        target = run_command(show_cmd).strip()
+        if not target or "error" in target.lower():
+            return f"Error: Could not find resource '{resource_name}' in '{resource_group}': {target}"
     
-    script_path = get_script_path("update-tags.ps1")
-    return run_powershell_script(script_path, params)
+    # Execute the action via az resource invoke-action or type-specific commands
+    # Detect resource type from ID for type-specific handling
+    target_lower = target.lower()
+    if "/microsoft.compute/virtualmachines/" in target_lower or target_lower.endswith("/microsoft.compute/virtualmachines"):
+        cmd = ["az", "vm", action, "--ids", target]
+        if action == "deallocate":
+            cmd = ["az", "vm", "deallocate", "--ids", target]
+    elif "/microsoft.web/sites/" in target_lower:
+        cmd = ["az", "webapp", action, "--ids", target]
+    elif "/microsoft.containerservice/managedclusters/" in target_lower:
+        cmd = ["az", "aks", action, "--ids", target] if action in ["start", "stop"] else None
+    elif "/microsoft.sql/servers/" in target_lower:
+        # SQL doesn't support restart directly
+        cmd = None
+    else:
+        # Generic: try az resource invoke-action
+        cmd = ["az", "resource", "invoke-action", "--ids", target, "--action", action]
+    
+    if cmd is None:
+        return f"Error: Action '{action}' is not supported for this resource type."
+    
+    result = run_command(cmd)
+    if "error" in result.lower():
+        return f"Action '{action}' failed:\n{result}"
+    
+    name = resource_name or target.split("/")[-1]
+    return f"Successfully executed '{action}' on resource: {name}"
 
 
 def get_activity_log(
@@ -544,7 +595,7 @@ def attach_to_nsp(resource_group: str, nsp_name: str = None, resource_id: str = 
     
     try:
         check_data = json.loads(check_result)
-    except:
+    except (json.JSONDecodeError, ValueError):
         return f"Error: Failed to parse NSP check result:\n{check_result}"
     
     if check_data.get("count", 0) == 0:
@@ -636,7 +687,7 @@ def attach_diagnostic_settings(resource_group: str, workspace_id: str = None, re
     
     try:
         check_data = json.loads(check_result)
-    except:
+    except (json.JSONDecodeError, ValueError):
         return f"Error: Failed to parse Log Analytics check result:\n{check_result}"
     
     workspace_name = None
@@ -664,7 +715,7 @@ def attach_diagnostic_settings(resource_group: str, workspace_id: str = None, re
             resources_new = check_data_new.get("resources", [])
             if resources_new:
                 workspace_id = resources_new[0].get("id")
-        except:
+        except (json.JSONDecodeError, ValueError):
             return "\n".join(output) + "\n\nError: Could not retrieve workspace ID after creation"
     else:
         resources = check_data.get("resources", [])
@@ -974,17 +1025,16 @@ def _get_resource_group_location(resource_group: str) -> tuple:
     Returns:
         (location: str, error: str)
     """
-    cmd = ["az", "group", "show", "-n", resource_group, "-o", "json"]
-    result = run_command(cmd)
-    
-    if "ERROR" in result or "error" in result.lower():
-        return "", f"Failed to get resource group location: {result}"
-    
-    try:
-        data = json.loads(result)
-        return data.get("location", ""), ""
-    except json.JSONDecodeError:
-        return "", f"Failed to parse resource group info: {result}"
+    from .utils import get_rg_location
+    location = get_rg_location(resource_group)
+    if not location or location == "eastus":
+        # Verify it's actually eastus and not a fallback from failure
+        cmd = ["az", "group", "show", "-n", resource_group, "--query", "location", "-o", "tsv"]
+        result = run_command(cmd)
+        if "error" in result.lower():
+            return "", f"Failed to get resource group location: {result}"
+        return result.strip() or "eastus", ""
+    return location, ""
 
 
 def _find_container_apps_environment(resource_group: str) -> tuple:
@@ -1319,85 +1369,6 @@ PARAM_DESCRIPTIONS = {
 }
 
 
-def get_bicep_requirements(resource_type: str) -> str:
-    """Returns required/optional params for a Bicep template in a formatted display."""
-    # Check if the resource type has variants - ask user to specify first
-    if resource_type in RESOURCE_VARIANTS:
-        variants = RESOURCE_VARIANTS[resource_type]
-        response = []
-        response.append("=" * 70)
-        response.append(f"  {resource_type.upper()} - SELECT VARIANT")
-        response.append("=" * 70)
-        response.append("")
-        response.append("This resource has multiple options. Choose one first:")
-        response.append("")
-        for variant_key, variant_desc in variants.items():
-            response.append(f"  [{variant_key}]")
-            response.append(f"      {variant_desc}")
-            response.append("")
-        response.append("=" * 70)
-        return "\n".join(response)
-    
-    if resource_type not in TEMPLATE_MAP:
-        return f"Unknown resource_type. Valid: {', '.join(sorted(TEMPLATE_MAP.keys()))}"
-    
-    template_path = get_template_path(TEMPLATE_MAP[resource_type])
-    params = parse_bicep_parameters(template_path)
-    
-    auto_calculated = []
-    if resource_type == "fabric-capacity":
-        auto_calculated.append("location")
-        tenant_region = get_fabric_tenant_region()
-    
-    required = [p for p, (req, _) in params.items() if req and p not in auto_calculated]
-    optional = [(p, params[p][1]) for p, (req, _) in params.items() if not req and p not in auto_calculated]
-    
-    response = []
-    response.append("=" * 70)
-    response.append(f"  {resource_type.upper()} - PARAMETERS")
-    response.append("=" * 70)
-    response.append("")
-    
-    response.append("REQUIRED")
-    response.append("-" * 70)
-    response.append(f"  {'Parameter':<28} {'Description':<30} {'Example'}")
-    response.append("-" * 70)
-    for param in required:
-        desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
-        response.append(f"  {param:<28} {desc:<30} {example}")
-        meta = PARAM_METADATA.get(param, {})
-        allowed = meta.get('allowed', [])
-        if allowed:
-            response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
-    response.append("")
-    
-    if optional:
-        response.append("OPTIONAL (with defaults)")
-        response.append("-" * 70)
-        response.append(f"  {'Parameter':<28} {'Default':<15} {'Example'}")
-        response.append("-" * 70)
-        for param, default in optional:
-            if param in auto_calculated:
-                continue
-            desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
-            default_str = str(default) if default else "-"
-            response.append(f"  {param:<28} {default_str:<15} {example}")
-            meta = PARAM_METADATA.get(param, {})
-            allowed = meta.get('allowed', [])
-            if allowed:
-                response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
-        response.append("")
-    
-    if resource_type == "fabric-capacity":
-        region = tenant_region if tenant_region else "westcentralus"
-        response.append(f"AUTO-DETECTED: location = {region}")
-        response.append("")
-    
-    response.append("=" * 70)
-    
-    return "\n".join(response)
-
-
 def create_resource(resource_type: str, resource_group: str = None, parameters: str = None) -> str:
     """Interactive Azure resource creation with formatted parameter prompts."""
     # Check if the resource type has variants that require user choice
@@ -1429,8 +1400,63 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
         except json.JSONDecodeError:
             return f"Error: Invalid JSON in parameters: {parameters}"
     
+    # Delegate to specialized functions for complex resource types
+    if resource_type in ("container-apps-env", "container-apps-environment", "aca-env"):
+        return create_container_apps_environment(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            environment_name=params_dict.get("environmentName") or params_dict.get("environment_name"),
+            subnet_id=params_dict.get("infrastructureSubnetId") or params_dict.get("subnet_id"),
+            log_analytics_workspace_id=params_dict.get("logAnalyticsWorkspaceId"),
+            zone_redundant=str(params_dict.get("zoneRedundant", "false")).lower() == "true",
+            workload_profile_type=params_dict.get("workloadProfileType", "Consumption"),
+            internal_only=str(params_dict.get("internalOnly", "false")).lower() == "true"
+        )
+    
+    if resource_type in ("container-app", "containerapp", "aca"):
+        return create_container_app(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            container_app_name=params_dict.get("containerAppName") or params_dict.get("container_app_name"),
+            environment_name=params_dict.get("environmentName") or params_dict.get("environment_name"),
+            target_port=int(params_dict.get("targetPort", 80)),
+            external_ingress=str(params_dict.get("externalIngress", "true")).lower() == "true",
+            cpu=params_dict.get("cpu", "0.5"),
+            memory=params_dict.get("memory", "1Gi"),
+            min_replicas=int(params_dict.get("minReplicas", 0)),
+            max_replicas=int(params_dict.get("maxReplicas", 10)),
+            subnet_id=params_dict.get("subnet_id") or params_dict.get("infrastructureSubnetId")
+        )
+    
+    if resource_type in ("data-collection-endpoint", "dce"):
+        return create_data_collection_endpoint(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            dce_name=params_dict.get("dceName") or params_dict.get("dce_name"),
+            public_network_access=params_dict.get("publicNetworkAccess", "Enabled"),
+            description=params_dict.get("description", "")
+        )
+    
+    if resource_type in ("data-collection-rule", "dcr"):
+        table_columns = params_dict.get("tableColumns") or params_dict.get("table_columns")
+        if isinstance(table_columns, str):
+            try:
+                table_columns = json.loads(table_columns)
+            except (json.JSONDecodeError, ValueError):
+                table_columns = None
+        return create_data_collection_rule(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            dcr_name=params_dict.get("dcrName") or params_dict.get("dcr_name"),
+            workspace_name=params_dict.get("workspaceName") or params_dict.get("workspace_name"),
+            dce_name=params_dict.get("dceName") or params_dict.get("dce_name"),
+            custom_table_base_name=params_dict.get("customTableBaseName") or params_dict.get("custom_table_base_name"),
+            table_columns=table_columns,
+            create_table=str(params_dict.get("createTable", "true")).lower() == "true",
+            workspace_resource_group=params_dict.get("workspaceResourceGroup"),
+            dce_resource_group=params_dict.get("dceResourceGroup"),
+            retention_in_days=int(params_dict.get("retentionInDays", 90)),
+            total_retention_in_days=int(params_dict.get("totalRetentionInDays", 180))
+        )
+
     template_path = get_template_path(TEMPLATE_MAP[resource_type])
-    template_params = parse_bicep_parameters(template_path)
+    template_params, param_metadata = parse_bicep_parameters(template_path)
     
     auto_calculated = []
     if resource_type == "fabric-capacity":
@@ -1471,7 +1497,7 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
         params_to_show = required_params if not resource_group else all_missing
         for param in params_to_show:
             desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
-            meta = PARAM_METADATA.get(param, {})
+            meta = param_metadata.get(param, {})
             allowed = meta.get('allowed', [])
             response.append(f"  {param:<28} {desc:<30} {example}")
             if allowed:
@@ -1504,7 +1530,7 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
                 desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
                 default_str = str(default) if default else "-"
                 response.append(f"  {param:<28} {default_str:<15} {example}")
-                meta = PARAM_METADATA.get(param, {})
+                meta = param_metadata.get(param, {})
                 allowed = meta.get('allowed', [])
                 if allowed:
                     response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
@@ -1546,6 +1572,10 @@ def deploy_bicep_resource(resource_group: str, resource_type: str, parameters: d
     
     ok, msg, parsed_params = validate_bicep_parameters(resource_type, parameters)
     if not ok:
+        # Get metadata for showing allowed values in error messages
+        template_path = get_template_path(TEMPLATE_MAP[resource_type])
+        _, param_metadata = parse_bicep_parameters(template_path)
+        
         response = []
         response.append("=" * 70)
         response.append(f"  CANNOT DEPLOY {resource_type.upper()} - PARAMETERS NEEDED")
@@ -1570,7 +1600,7 @@ def deploy_bicep_resource(resource_group: str, resource_type: str, parameters: d
             response.append("  MISSING REQUIRED PARAMETERS:")
             response.append("-" * 70)
             for param in missing:
-                meta = PARAM_METADATA.get(param, {})
+                meta = param_metadata.get(param, {})
                 desc = meta.get('description', param)
                 allowed = meta.get('allowed', [])
                 response.append(f"    {param}: {desc}")
@@ -2685,3 +2715,173 @@ Optional:
     output_lines.append(result)
     
     return "\n".join(output_lines)
+
+
+# ============================================================================
+# IDENTITY LOOKUP
+# ============================================================================
+
+def lookup_identity(identifier: str, identity_type: str = None) -> str:
+    """Look up a user, group, or service principal by email/name and return Object ID."""
+    if not identifier or not identifier.strip():
+        return "Error: Please provide an identifier (email, display name, or app name) to look up."
+    
+    identifier = identifier.strip()
+    results = []
+    
+    # Auto-detect type or try all if not specified
+    types_to_try = []
+    if identity_type:
+        types_to_try = [identity_type.lower()]
+    elif "@" in identifier:
+        types_to_try = ["user"]
+    else:
+        types_to_try = ["user", "group", "serviceprincipal"]
+    
+    for id_type in types_to_try:
+        if id_type == "user":
+            cmd = ["az", "ad", "user", "list", "--filter",
+                   f"mail eq '{identifier}' or userPrincipalName eq '{identifier}' or displayName eq '{identifier}'",
+                   "--query", "[].{displayName:displayName, objectId:id, userPrincipalName:userPrincipalName, type:'User'}",
+                   "-o", "json"]
+        elif id_type == "group":
+            cmd = ["az", "ad", "group", "list", "--filter",
+                   f"displayName eq '{identifier}'",
+                   "--query", "[].{displayName:displayName, objectId:id, type:'Group'}",
+                   "-o", "json"]
+        elif id_type == "serviceprincipal":
+            cmd = ["az", "ad", "sp", "list", "--filter",
+                   f"displayName eq '{identifier}'",
+                   "--query", "[].{displayName:displayName, objectId:id, appId:appId, type:'ServicePrincipal'}",
+                   "-o", "json"]
+        else:
+            continue
+        
+        result = run_command(cmd)
+        if "error" not in result.lower():
+            try:
+                items = json.loads(result)
+                if items:
+                    results.extend(items)
+            except (json.JSONDecodeError, ValueError):
+                pass
+    
+    if not results:
+        return f"No identity found matching '{identifier}'. Try:\n- Exact email (user@domain.com)\n- Exact display name\n- For service principals, use the app registration display name"
+    
+    output = [f"Found {len(results)} result(s) for '{identifier}':", ""]
+    for item in results:
+        output.append(f"  Display Name: {item.get('displayName', 'N/A')}")
+        output.append(f"  Object ID:    {item.get('objectId', 'N/A')}")
+        if item.get('userPrincipalName'):
+            output.append(f"  UPN:          {item['userPrincipalName']}")
+        if item.get('appId'):
+            output.append(f"  App ID:       {item['appId']}")
+        output.append(f"  Type:         {item.get('type', 'Unknown')}")
+        output.append("")
+    
+    return "\n".join(output)
+
+
+# ============================================================================
+# DELETE OPERATIONS
+# ============================================================================
+
+def delete_resource(resource_id: str = None, resource_name: str = None,
+                    resource_group: str = None, resource_type: str = None) -> str:
+    """Delete an Azure resource by ID or by name+RG+type."""
+    if resource_id:
+        cmd = ["az", "resource", "delete", "--ids", resource_id]
+    elif resource_name and resource_group:
+        if resource_type and resource_type in RESOURCE_TYPE_PROVIDER_MAP:
+            provider = RESOURCE_TYPE_PROVIDER_MAP[resource_type]
+            cmd = ["az", "resource", "delete", "-g", resource_group,
+                   "-n", resource_name, "--resource-type", provider]
+        else:
+            return ("Error: resource_type is required when deleting by name. "
+                    "Provide the resource type (e.g., 'storage-account', 'key-vault').")
+    else:
+        return "Error: Provide either resource_id OR (resource_name + resource_group + resource_type)."
+    
+    result = run_command(cmd)
+    if "error" in result.lower():
+        return f"Delete failed:\n{result}"
+    
+    name = resource_name or (resource_id.split("/")[-1] if resource_id else "unknown")
+    return f"Successfully deleted resource: {name}"
+
+
+def delete_resource_group(resource_group: str) -> str:
+    """Delete an Azure resource group and all its contents."""
+    if not resource_group or not resource_group.strip():
+        return "Error: resource_group name is required."
+    
+    cmd = ["az", "group", "delete", "-n", resource_group, "--yes", "--no-wait"]
+    result = run_command(cmd)
+    
+    if "error" in result.lower():
+        return f"Delete failed:\n{result}"
+    
+    return f"Resource group '{resource_group}' deletion initiated (async). It may take a few minutes to complete."
+
+
+# ============================================================================
+# PIM DEACTIVATION
+# ============================================================================
+
+def deactivate_pim_role(subscription_name: str = None, role_name: str = None,
+                        resource_group_name: str = None) -> str:
+    """Deactivate an active PIM role."""
+    if not role_name:
+        return "Error: role_name is required. Specify which role to deactivate."
+    if not subscription_name:
+        return "Error: subscription_name is required. Specify the subscription scope."
+    
+    script_path = get_script_path("activate-pim.ps1")
+    if not os.path.exists(script_path):
+        return "Error: activate-pim.ps1 not found"
+    
+    params = {
+        "Action": "deactivate",
+        "RoleName": role_name,
+        "SubscriptionName": subscription_name
+    }
+    if resource_group_name:
+        params["ResourceGroupName"] = resource_group_name
+    
+    return run_powershell_script(script_path, params)
+
+
+# ============================================================================
+# LOG ANALYTICS QUERY
+# ============================================================================
+
+def query_logs(workspace_name: str = None, resource_group: str = None,
+               query: str = None, timespan: str = "P1D") -> str:
+    """Run a KQL query against a Log Analytics workspace."""
+    if not query:
+        return "Error: A KQL query string is required."
+    if not workspace_name:
+        return "Error: workspace_name is required."
+    
+    cmd = [
+        "az", "monitor", "log-analytics", "query",
+        "--workspace", workspace_name,
+        "--analytics-query", query,
+        "--timespan", timespan,
+        "-o", "json"
+    ]
+    if resource_group:
+        cmd.extend(["--resource-group", resource_group])
+    
+    result = run_command(cmd)
+    if "error" in result.lower():
+        return f"Query failed:\n{result}"
+    
+    try:
+        data = json.loads(result)
+        if isinstance(data, list) and len(data) == 0:
+            return "Query returned 0 results."
+        return json.dumps(data, indent=2)
+    except (json.JSONDecodeError, ValueError):
+        return result

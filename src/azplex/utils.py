@@ -8,14 +8,14 @@ import re
 import shutil
 import json
 import platform
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional
 
 # ============================================================================
 # CONSTANTS - Error Detection
 # ============================================================================
 
-# Keywords that indicate deployment/operation failures
-ERROR_KEYWORDS = ["Error", "error", "FAILED", "Failed", "failed"]
+# Keywords that indicate deployment/operation failures (all lowercase, used with .lower())
+ERROR_KEYWORDS = ["error", "failed"]
 
 # Azure-specific error patterns with user-friendly messages and solutions
 AZURE_ERROR_PATTERNS = {
@@ -426,7 +426,6 @@ PIPELINE_TYPE_KEYWORDS = {
 # Operational Scripts
 OP_SCRIPTS = {
     "permissions": "list-azure-permissions.ps1",
-    "resources": "list-resources.ps1",
     "create-rg": "create-resourcegroup.ps1",
     "deploy-bicep": "deploy-bicep.ps1",
     "create-funcapp-containers": "create-funcapp-containers.ps1"
@@ -553,38 +552,6 @@ def detect_pipeline_type(pipeline_name: str, user_input: str = "") -> str:
     return "codeql"
 
 
-def get_pipeline_template(pipeline_type: str) -> Optional[str]:
-    """
-    Gets the pipeline template path for a given pipeline type.
-    Falls back to codeql if requested type doesn't exist.
-    """
-    if pipeline_type in PIPELINE_TEMPLATE_MAP:
-        template_rel = PIPELINE_TEMPLATE_MAP[pipeline_type]
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_rel)
-        if os.path.exists(template_path):
-            return template_path
-    
-    normalized_type = pipeline_type.lower().replace('_', '-').replace(' ', '-')
-    if normalized_type in PIPELINE_TEMPLATE_MAP:
-        template_rel = PIPELINE_TEMPLATE_MAP[normalized_type]
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_rel)
-        if os.path.exists(template_path):
-            return template_path
-    
-    if "codeql" in PIPELINE_TEMPLATE_MAP:
-        template_rel = PIPELINE_TEMPLATE_MAP["codeql"]
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_rel)
-        if os.path.exists(template_path):
-            return template_path
-    
-    for template_rel in PIPELINE_TEMPLATE_MAP.values():
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_rel)
-        if os.path.exists(template_path):
-            return template_path
-    
-    return None
-
-
 # ============================================================================
 # HELPER FUNCTIONS - Azure Resources
 # ============================================================================
@@ -594,82 +561,8 @@ def get_rg_location(resource_group: str) -> str:
     try:
         res = run_command(["az", "group", "show", "-n", resource_group, "--query", "location", "-o", "tsv"])
         return res.strip()
-    except:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return "eastus"
-
-
-def get_vnet_subnets(resource_group: str, vnet_name: str) -> list[dict]:
-    """Gets existing subnets in a VNet with their address prefixes."""
-    try:
-        cmd = f'az network vnet subnet list -g "{resource_group}" --vnet-name "{vnet_name}" --query "[].{{name:name, addressPrefix:addressPrefix}}" -o json'
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=60
-        )
-        
-        if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout.strip())
-        return []
-    except Exception as e:
-        print(f"[WARN] Failed to get VNet subnets: {e}")
-        return []
-
-
-def calculate_next_subnet_address(resource_group: str, vnet_name: str, subnet_size: int = 27) -> Optional[str]:
-    """Calculates the next available subnet starting address based on existing subnets."""
-    try:
-        cmd = f'az network vnet show -g "{resource_group}" -n "{vnet_name}" --query "addressSpace.addressPrefixes[0]" -o tsv'
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=60
-        )
-        
-        if result.returncode != 0 or not result.stdout.strip():
-            print(f"[WARN] Failed to get VNet address space: {result.stderr}")
-            return None
-        
-        vnet_cidr = result.stdout.strip()
-        vnet_base_ip = vnet_cidr.split('/')[0]
-        vnet_prefix = int(vnet_cidr.split('/')[1])
-        
-        base_octets = [int(x) for x in vnet_base_ip.split('.')]
-        base_int = (base_octets[0] << 24) + (base_octets[1] << 16) + (base_octets[2] << 8) + base_octets[3]
-        
-        vnet_size = 2 ** (32 - vnet_prefix)
-        vnet_end = base_int + vnet_size
-        
-        subnets = get_vnet_subnets(resource_group, vnet_name)
-        new_subnet_size = 2 ** (32 - subnet_size)
-        
-        used_ranges = []
-        for subnet in subnets:
-            prefix = subnet.get('addressPrefix', '')
-            if '/' in prefix:
-                subnet_ip = prefix.split('/')[0]
-                subnet_cidr = int(prefix.split('/')[1])
-                subnet_octets = [int(x) for x in subnet_ip.split('.')]
-                subnet_start = (subnet_octets[0] << 24) + (subnet_octets[1] << 16) + (subnet_octets[2] << 8) + subnet_octets[3]
-                subnet_range = 2 ** (32 - subnet_cidr)
-                used_ranges.append((subnet_start, subnet_start + subnet_range))
-        
-        used_ranges.sort(key=lambda x: x[0])
-        candidate = base_int
-        
-        for start, end in used_ranges:
-            if candidate + new_subnet_size <= start:
-                break
-            if candidate < end:
-                candidate = end
-        
-        if candidate + new_subnet_size > vnet_end:
-            print(f"[WARN] No available space in VNet. Candidate={candidate}, VNet end={vnet_end}")
-            return None
-        
-        next_addr = f"{(candidate >> 24) & 255}.{(candidate >> 16) & 255}.{(candidate >> 8) & 255}.{candidate & 255}"
-        print(f"[INFO] Calculated next subnet address: {next_addr}")
-        return next_addr
-        
-    except Exception as e:
-        print(f"[WARN] Failed to calculate next subnet address: {e}")
-        return None
 
 
 def get_fabric_tenant_region() -> Optional[str]:
@@ -700,43 +593,6 @@ def get_fabric_tenant_region() -> Optional[str]:
         
         return None
     except Exception:
-        return None
-
-
-def get_resource_id(resource_group: str, resource_type: str, parameters: Dict[str, str]) -> Optional[str]:
-    """Attempts to find the Resource ID based on parameters provided during creation."""
-    name_keys = [
-        "name", "accountName", "keyVaultName", "serverName", "databaseName", "storageAccountName",
-        "workspaceName", "searchServiceName", "serviceName", "vmName", "virtualMachineName",
-        "siteName", "functionAppName", "appServiceName", "logicAppName", "workflowName",
-        "factoryName", "cacheName", "frontDoorName", "clusterName", "wafPolicyName",
-        "vpnGatewayName", "natGatewayName", "ddosProtectionPlanName", "firewallPolicyName",
-        "dnsResolverName", "alertRuleName"
-    ]
-    
-    resource_name = None
-    for key in name_keys:
-        if key in parameters:
-            resource_name = parameters[key]
-            break
-            
-    if not resource_name:
-        return None
-
-    provider = RESOURCE_TYPE_PROVIDER_MAP.get(resource_type)
-    if not provider:
-        return None
-
-    try:
-        cmd = [
-            "az", "resource", "show", 
-            "-g", resource_group, 
-            "-n", resource_name, 
-            "--resource-type", provider, 
-            "--query", "id", "-o", "tsv"
-        ]
-        return run_command(cmd).strip()
-    except:
         return None
 
 
@@ -1169,13 +1025,14 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
     return "\n".join(details)
 
 
-def parse_bicep_parameters(template_path: str) -> Dict[str, Tuple[bool, Optional[str]]]:
+def parse_bicep_parameters(template_path: str) -> Tuple[Dict[str, Tuple[bool, Optional[str]]], Dict[str, dict]]:
     """Parse bicep template to extract parameters, @allowed values, @description, and constraints.
     
-    Returns dict of param_name -> (required: bool, default_value: str|None)
-    Also stores extended info in PARAM_METADATA for allowed values and descriptions.
+    Returns tuple of:
+        - params: dict of param_name -> (required: bool, default_value: str|None)
+        - metadata: dict of param_name -> constraint info (allowed values, descriptions, etc.)
     """
-    global PARAM_METADATA
+    param_metadata: Dict[str, dict] = {}
     params: Dict[str, Tuple[bool, Optional[str]]] = {}
     try:
         with open(template_path, 'r', encoding='utf-8') as f:
@@ -1251,7 +1108,7 @@ def parse_bicep_parameters(template_path: str) -> Dict[str, Tuple[bool, Optional
                     params[name] = (required, default_raw)
                     
                     # Store extended metadata
-                    PARAM_METADATA[name] = {
+                    param_metadata[name] = {
                         'allowed': allowed_values,
                         'description': description,
                         'min_length': min_length,
@@ -1262,11 +1119,7 @@ def parse_bicep_parameters(template_path: str) -> Dict[str, Tuple[bool, Optional
             i += 1
     except Exception:
         pass
-    return params
-
-
-# Global metadata storage for parameter constraints parsed from Bicep templates
-PARAM_METADATA: Dict[str, dict] = {}
+    return params, param_metadata
 
 
 def validate_bicep_parameters(resource_type: str, provided: Dict[str, str]) -> Tuple[bool, str, Dict[str, Tuple[bool, Optional[str]]]]:
@@ -1283,7 +1136,7 @@ def validate_bicep_parameters(resource_type: str, provided: Dict[str, str]) -> T
     template_path = get_template_path(TEMPLATE_MAP[resource_type])
     if not os.path.exists(template_path):
         return False, f"Template not found at {template_path}", {}
-    params = parse_bicep_parameters(template_path)
+    params, param_metadata = parse_bicep_parameters(template_path)
     
     auto_calculated = []
     # Fabric capacity location is auto-detected from tenant region
@@ -1297,8 +1150,8 @@ def validate_bicep_parameters(resource_type: str, provided: Dict[str, str]) -> T
     # Validate @allowed values
     invalid_values = []
     for param_name, value in provided.items():
-        if param_name in PARAM_METADATA and value not in (None, ""):
-            meta = PARAM_METADATA[param_name]
+        if param_name in param_metadata and value not in (None, ""):
+            meta = param_metadata[param_name]
             allowed = meta.get('allowed', [])
             if allowed and str(value).strip("'\"") not in allowed:
                 invalid_values.append(
@@ -1372,7 +1225,6 @@ def deploy_bicep(resource_group: str, resource_type: str, parameters: Dict[str, 
             output_lines.append("")
             output_lines.append("Running post-deployment tasks for Function App...")
             
-            function_app_name = parameters.get("functionAppName", "")
             storage_account_name = parameters.get("storageAccountName", "")
             uami_name = parameters.get("uamiName", "")
             
@@ -1398,8 +1250,9 @@ def deploy_bicep(resource_group: str, resource_type: str, parameters: Dict[str, 
                 container_script = OP_SCRIPTS.get("create-funcapp-containers")
                 if container_script:
                     container_script_path = os.path.join(os.path.dirname(__file__), "scripts", container_script)
+                    ps_executable = "pwsh" if shutil.which("pwsh") else "powershell"
                     container_cmd = [
-                        "powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                        ps_executable, "-ExecutionPolicy", "Bypass", "-File",
                         container_script_path,
                         "-StorageAccountName", storage_account_name,
                         "-ResourceGroup", resource_group
@@ -1414,8 +1267,6 @@ def deploy_bicep(resource_group: str, resource_type: str, parameters: Dict[str, 
         
         else:
             output = [format_deployment_details(resource_type, resource_group, parameters)]
-        
-        resource_id = get_resource_id(resource_group, resource_type, parameters)
         
         # NSP compliance prompt
         if resource_type in NSP_MANDATORY_RESOURCES:
