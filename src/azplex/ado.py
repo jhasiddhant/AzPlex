@@ -19,13 +19,23 @@ except ImportError:
 
 
 # ============================================================================
+# Azure DevOps - Helpers
+# ============================================================================
+
+def _normalize_org_url(organization: str) -> str:
+    """Normalize ADO organization to full URL format."""
+    if organization and not organization.strip().lower().startswith("http"):
+        return f"https://dev.azure.com/{organization.strip()}"
+    return organization
+
+
+# ============================================================================
 # Azure DevOps - Projects & Repos
 # ============================================================================
 
 def create_project(organization: str = None, project_name: str = None, repo_name: str = None, description: str = None) -> str:
     """Creates an Azure DevOps project using AZ CLI via the PS1 script and sets the initial repo name."""
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    organization = _normalize_org_url(organization)
 
     missing = []
     if not organization or not organization.strip():
@@ -63,8 +73,7 @@ def create_project(organization: str = None, project_name: str = None, repo_name
 
 def create_repo(organization: str = None, project_name: str = None, repo_name: str = None) -> str:
     """Creates a new Azure DevOps Git repository via the PS1 script."""
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    organization = _normalize_org_url(organization)
 
     missing = []
     if not organization or not organization.strip():
@@ -100,8 +109,7 @@ def create_repo(organization: str = None, project_name: str = None, repo_name: s
 
 def list_projects(organization: str = None) -> str:
     """Lists all Azure DevOps projects in an organization."""
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    organization = _normalize_org_url(organization)
 
     if not organization or not organization.strip():
         return (
@@ -128,8 +136,7 @@ def list_projects(organization: str = None) -> str:
 
 def list_repos(organization: str = None, project_name: str = None) -> str:
     """Lists all Azure DevOps repositories in a project."""
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    organization = _normalize_org_url(organization)
 
     missing = []
     if not organization or not organization.strip():
@@ -164,8 +171,7 @@ def create_branch(organization: str = None, project_name: str = None,
                   repo_name: str = None, branch_name: str = None, 
                   base_branch: str = None) -> str:
     """Creates a new branch in an Azure DevOps repository from a base branch."""
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    organization = _normalize_org_url(organization)
 
     missing = []
     if not organization or not organization.strip():
@@ -209,73 +215,12 @@ def create_branch(organization: str = None, project_name: str = None,
 # Azure DevOps - Pipelines
 # ============================================================================
 
-def deploy_custom_yaml(organization: str, project_name: str, repo_name: str,
-                       branch: str, file_name: str, yaml_content: str,
-                       folder_path: str = "pipelines") -> str:
-    """Deploys custom YAML content directly to an Azure DevOps repository."""
-    missing = []
-    if not organization or not organization.strip():
-        missing.append("organization (Azure DevOps org URL)")
-    if not project_name or not project_name.strip():
-        missing.append("project_name (existing project)")
-    if not repo_name or not repo_name.strip():
-        missing.append("repo_name (existing repo)")
-    if not branch or not branch.strip():
-        missing.append("branch (target branch, e.g., 'main', 'dev')")
-    if not file_name or not file_name.strip():
-        missing.append("file_name (display name for YAML, e.g., 'sourcebranchvalidation.yml')")
-    if not yaml_content or not yaml_content.strip():
-        missing.append("yaml_content (the actual YAML content to deploy)")
-    
-    if missing:
-        return (
-            "Deploy Custom YAML - Missing Required Parameters\n\n"
-            "Please provide:\n"
-            + "\n".join([f"  - {m}" for m in missing]) +
-            "\n\nExample usage:\n"
-            "  organization: 'https://dev.azure.com/myorg'\n"
-            "  project_name: 'MyProject'\n"
-            "  repo_name: 'MyRepo'\n"
-            "  branch: 'dev'\n"
-            "  file_name: 'my-pipeline.yml'\n"
-            "  yaml_content: '<paste your YAML content>'"
-        )
-    
-    if not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
-    
-    if not file_name.endswith('.yml') and not file_name.endswith('.yaml'):
-        file_name = f"{file_name}.yml"
-    
-    deploy_script = get_script_path("deploy-pipeline-yaml.ps1")
-    if not os.path.exists(deploy_script):
-        return "Error: deploy-pipeline-yaml.ps1 not found"
-    
-    params = {
-        "Organization": organization,
-        "ProjectName": project_name,
-        "RepoName": repo_name,
-        "TemplateName": file_name.replace('.yml', '').replace('.yaml', ''),
-        "Branch": branch,
-        "FolderPath": folder_path,
-        "CustomYamlContent": yaml_content,
-        "YamlFileName": file_name
-    }
-    
-    try:
-        out = run_powershell_script(deploy_script, params)
-        return out.strip()
-    except Exception as e:
-        return f"Custom YAML deployment failed\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nScript: {deploy_script}\nParameters: {params}\n\nCommon causes:\n- Repository not initialized\n- Branch does not exist\n- No write access\n- Git authentication failed\n- Invalid YAML syntax"
-
-
 def deploy_pipeline_yaml(organization: str = None, project_name: str = None, 
                          repo_name: str = None, pipeline_type: str = None,
                          branch: str = None, folder_path: str = None,
                          custom_yaml_content: str = None, yaml_file_name: str = None) -> str:
-    """Deploys a pipeline YAML template from agent/templates OR custom YAML content to an Azure DevOps repository."""
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    """Deploys a pipeline YAML template or custom YAML content to an Azure DevOps repository."""
+    organization = _normalize_org_url(organization)
 
     missing = []
     if not organization or not organization.strip():
@@ -352,8 +297,7 @@ def create_pipeline(organization: str = None, project_name: str = None,
                     branch: str = None, pipeline_type: str = None,
                     yaml_path: str = None) -> str:
     """Creates an Azure DevOps pipeline from YAML file in repository."""
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    organization = _normalize_org_url(organization)
 
     if pipeline_name and not pipeline_type:
         pipeline_type = detect_pipeline_type(pipeline_name, "")
@@ -469,8 +413,7 @@ def assign_role(
         return "Missing required parameters:\n" + "\n".join([f"  - {m}" for m in missing])
     
     # Normalize organization URL
-    if organization and not organization.strip().lower().startswith("http"):
-        organization = f"https://dev.azure.com/{organization.strip()}"
+    organization = _normalize_org_url(organization)
     
     script_path = get_script_path("assign-ado-role.ps1")
     if not os.path.exists(script_path):

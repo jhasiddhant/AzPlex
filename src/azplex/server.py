@@ -466,22 +466,6 @@ def azure_create_resource_group(resource_group_name: str, region: str, project_n
 # ============================================================================
 
 @mcp.tool()
-def azure_check_resource(resource_group: str, resource_type: str) -> str:
-    """
-    Checks for specific resource types in a resource group.
-    Returns a list of resources found, or indicates if none exist.
-    
-    Args:
-        resource_group: Resource group name to check
-        resource_type: Type of resource to check (nsp, network-security-perimeter, log-analytics, storage-account, key-vault, openai, ai-search, cosmos-db, sql-db, fabric-capacity, uami)
-    
-    Returns:
-        JSON string with resource information
-    """
-    return azure.check_resource(resource_group, resource_type)
-
-
-@mcp.tool()
 def azure_attach_to_nsp(resource_group: str, nsp_name: str = None, resource_id: str = None) -> str:
     """
     Attaches a resource to a Network Security Perimeter (NSP) with automatic NSP management.
@@ -1353,47 +1337,18 @@ def ado_create_branch(organization: str = None, project_name: str = None,
 # ============================================================================
 
 @mcp.tool()
-def ado_deploy_custom_yaml(organization: str, project_name: str, repo_name: str,
-                           branch: str, file_name: str, yaml_content: str,
-                           folder_path: str = "pipelines") -> str:
-    """
-    Deploys custom YAML content directly to an Azure DevOps repository.
-    Use this when you have YAML content to deploy (not using templates).
-    
-    Args:
-        organization: Azure DevOps organization URL (required)
-        project_name: Existing project name (required)
-        repo_name: Existing repository name (required)
-        branch: Branch to deploy to (required, e.g., 'main', 'dev')
-        file_name: Target filename/display name for the YAML file (required, e.g., 'sourcebranchvalidation.yml')
-        yaml_content: The actual YAML content to deploy (required - paste full YAML here)
-        folder_path: Folder in repo for YAML (defaults to 'pipelines')
-    
-    Returns:
-        Deployment status and YAML location
-    """
-    return ado.deploy_custom_yaml(organization, project_name, repo_name, branch, file_name, yaml_content, folder_path)
-
-
-@mcp.tool()
 def ado_deploy_pipeline_yaml(organization: str = None, project_name: str = None, 
                         repo_name: str = None, pipeline_type: str = None,
                         branch: str = None, folder_path: str = None,
                         custom_yaml_content: str = None, yaml_file_name: str = None) -> str:
     """
-    Deploys a pipeline YAML template from agent/templates OR custom YAML content to an Azure DevOps repository.
+    Deploys a pipeline YAML template or custom YAML content to an Azure DevOps repository.
     
     Workflow:
-    1. If custom_yaml_content provided → deploys custom YAML
+    1. If custom_yaml_content provided → deploys custom YAML directly
     2. If pipeline_type matches PIPELINE_TEMPLATE_MAP entry → uses that template
     3. Otherwise → prompts for custom YAML content
     4. Clones repo, copies YAML to specified folder, commits and pushes
-    
-    Template Management (Similar to Bicep TEMPLATE_MAP):
-    - Templates are mapped in PIPELINE_TEMPLATE_MAP (see server.py)
-    - To add new templates:
-      1. Add .yml file to agent/templates/
-      2. Add entry to PIPELINE_TEMPLATE_MAP: "template-key": "templates/YourTemplate.yml"
     
     Available Templates:
     - codeql: CodeQL_Pipeline.yml (standard non-production)

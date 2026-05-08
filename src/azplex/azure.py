@@ -973,17 +973,16 @@ def _get_resource_group_location(resource_group: str) -> tuple:
     Returns:
         (location: str, error: str)
     """
-    cmd = ["az", "group", "show", "-n", resource_group, "-o", "json"]
-    result = run_command(cmd)
-    
-    if "ERROR" in result or "error" in result.lower():
-        return "", f"Failed to get resource group location: {result}"
-    
-    try:
-        data = json.loads(result)
-        return data.get("location", ""), ""
-    except json.JSONDecodeError:
-        return "", f"Failed to parse resource group info: {result}"
+    from .utils import get_rg_location
+    location = get_rg_location(resource_group)
+    if not location or location == "eastus":
+        # Verify it's actually eastus and not a fallback from failure
+        cmd = ["az", "group", "show", "-n", resource_group, "--query", "location", "-o", "tsv"]
+        result = run_command(cmd)
+        if "error" in result.lower():
+            return "", f"Failed to get resource group location: {result}"
+        return result.strip() or "eastus", ""
+    return location, ""
 
 
 def _find_container_apps_environment(resource_group: str) -> tuple:

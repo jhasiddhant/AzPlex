@@ -426,7 +426,6 @@ PIPELINE_TYPE_KEYWORDS = {
 # Operational Scripts
 OP_SCRIPTS = {
     "permissions": "list-azure-permissions.ps1",
-    "resources": "list-resources.ps1",
     "create-rg": "create-resourcegroup.ps1",
     "deploy-bicep": "deploy-bicep.ps1",
     "create-funcapp-containers": "create-funcapp-containers.ps1"
