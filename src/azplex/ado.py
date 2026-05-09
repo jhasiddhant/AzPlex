@@ -430,3 +430,95 @@ def assign_role(
         return run_powershell_script(script_path, params)
     except Exception as e:
         return f"ADO role assignment failed\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nScript: {script_path}\nParameters: {params}\n\nCommon causes:\n- Not authenticated: Run 'az login'\n- No Project Administrator or Collection Administrator access\n- Invalid organization URL or project name\n- Invalid principal ID (Object ID)\n- Role/group does not exist in the project"
+
+
+# ============================================================================
+# Azure DevOps - Delete Operations
+# ============================================================================
+
+def delete_repo(organization: str = None, project_name: str = None, repo_name: str = None) -> str:
+    """Deletes an Azure DevOps Git repository."""
+    organization = _normalize_org_url(organization)
+    
+    missing = []
+    if not organization or not organization.strip():
+        missing.append("organization (org URL)")
+    if not project_name or not project_name.strip():
+        missing.append("project_name (existing project)")
+    if not repo_name or not repo_name.strip():
+        missing.append("repo_name (repo to delete)")
+    if missing:
+        return "Delete ADO Repo - Missing:\n" + "\n".join([f"  - {m}" for m in missing])
+    
+    from .utils import run_command
+    
+    # Get repo ID first
+    get_cmd = ["az", "repos", "show", "--repository", repo_name,
+               "--org", organization, "--project", project_name, "--query", "id", "-o", "tsv"]
+    repo_id = run_command(get_cmd).strip()
+    
+    if "error" in repo_id.lower() or not repo_id:
+        return f"Error: Could not find repo '{repo_name}' in project '{project_name}'. Verify the name and your access."
+    
+    # Delete the repo
+    del_cmd = ["az", "repos", "delete", "--id", repo_id,
+               "--org", organization, "--project", project_name, "--yes"]
+    result = run_command(del_cmd)
+    
+    if "error" in result.lower():
+        return f"Delete failed:\n{result}"
+    
+    return f"Successfully deleted repository: {repo_name}"
+
+
+# ============================================================================
+# Azure DevOps - Pipeline Triggers
+# ============================================================================
+
+def trigger_pipeline(organization: str = None, project_name: str = None,
+                     pipeline_name: str = None, pipeline_id: str = None,
+                     branch: str = "main") -> str:
+    """Triggers/runs an existing Azure DevOps pipeline."""
+    organization = _normalize_org_url(organization)
+    
+    missing = []
+    if not organization or not organization.strip():
+        missing.append("organization (org URL)")
+    if not project_name or not project_name.strip():
+        missing.append("project_name (existing project)")
+    if not pipeline_name and not pipeline_id:
+        missing.append("pipeline_name or pipeline_id (pipeline to trigger)")
+    if missing:
+        return "Trigger Pipeline - Missing:\n" + "\n".join([f"  - {m}" for m in missing])
+    
+    from .utils import run_command
+    
+    cmd = ["az", "pipelines", "run",
+           "--org", organization, "--project", project_name,
+           "--branch", branch]
+    
+    if pipeline_id:
+        cmd.extend(["--id", str(pipeline_id)])
+    else:
+        cmd.extend(["--name", pipeline_name])
+    
+    cmd.extend(["-o", "json"])
+    result = run_command(cmd)
+    
+    if "error" in result.lower():
+        return f"Pipeline trigger failed:\n{result}"
+    
+    try:
+        data = json.loads(result)
+        run_id = data.get("id", "N/A")
+        status = data.get("status", "N/A")
+        web_url = data.get("_links", {}).get("web", {}).get("href", "")
+        
+        output = [f"Pipeline triggered successfully!",
+                  f"  Run ID: {run_id}",
+                  f"  Status: {status}"]
+        if web_url:
+            output.append(f"  URL: {web_url}")
+        return "\n".join(output)
+    except (json.JSONDecodeError, ValueError):
+        return f"Pipeline triggered. Output:\n{result}"

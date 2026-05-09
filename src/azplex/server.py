@@ -1443,6 +1443,160 @@ def ado_assign_role(
 
 
 # ============================================================================
+# IDENTITY & LOOKUP
+# ============================================================================
+
+@mcp.tool()
+def azure_lookup_identity(identifier: str, identity_type: str = None) -> str:
+    """
+    Look up an Azure AD identity (user, group, or service principal) by email, display name, or app name.
+    Returns Object ID and details. Useful before assigning RBAC/PIM roles.
+
+    Args:
+        identifier: Email address, display name, or app name to search for
+        identity_type: Optional filter - 'user', 'group', or 'serviceprincipal'
+
+    Returns:
+        Identity details including Object ID
+    """
+    return azure.lookup_identity(identifier, identity_type)
+
+
+# ============================================================================
+# DELETE OPERATIONS
+# ============================================================================
+
+@mcp.tool()
+def azure_delete_resource(resource_id: str = None, resource_name: str = None,
+                          resource_group: str = None, resource_type: str = None) -> str:
+    """
+    Delete an Azure resource. Provide either the full resource_id OR resource_name + resource_group + resource_type.
+
+    Args:
+        resource_id: Full ARM resource ID (alternative to name-based lookup)
+        resource_name: Name of the resource
+        resource_group: Resource group containing the resource
+        resource_type: Type key (e.g., 'storage-account', 'key-vault')
+
+    Returns:
+        Deletion confirmation or error
+    """
+    return azure.delete_resource(resource_id, resource_name, resource_group, resource_type)
+
+
+@mcp.tool()
+def azure_delete_resource_group(resource_group: str) -> str:
+    """
+    Delete an Azure resource group and all resources within it. This is irreversible.
+
+    Args:
+        resource_group: Name of the resource group to delete
+
+    Returns:
+        Deletion status
+    """
+    return azure.delete_resource_group(resource_group)
+
+
+@mcp.tool()
+def ado_delete_repo(organization: str = None, project_name: str = None, repo_name: str = None) -> str:
+    """
+    Delete an Azure DevOps Git repository. This is irreversible.
+
+    Args:
+        organization: Azure DevOps organization URL or name
+        project_name: Project containing the repository
+        repo_name: Name of the repository to delete
+
+    Returns:
+        Deletion confirmation or error
+    """
+    return ado.delete_repo(organization, project_name, repo_name)
+
+
+# ============================================================================
+# PIM DEACTIVATION
+# ============================================================================
+
+@mcp.tool()
+def azure_deactivate_pim_role(subscription_name: str = None, role_name: str = None,
+                              resource_group_name: str = None) -> str:
+    """
+    Deactivate an active PIM (Privileged Identity Management) role assignment.
+
+    Args:
+        subscription_name: Subscription scope for the role
+        role_name: Name of the role to deactivate
+        resource_group_name: Optional resource group scope
+
+    Returns:
+        Deactivation result
+    """
+    return azure.deactivate_pim_role(subscription_name, role_name, resource_group_name)
+
+
+# ============================================================================
+# PIPELINE TRIGGER
+# ============================================================================
+
+@mcp.tool()
+def ado_trigger_pipeline(organization: str = None, project_name: str = None,
+                         pipeline_name: str = None, pipeline_id: str = None,
+                         branch: str = "main") -> str:
+    """
+    Trigger/run an existing Azure DevOps pipeline.
+
+    Args:
+        organization: Azure DevOps organization URL or name
+        project_name: Project containing the pipeline
+        pipeline_name: Name of the pipeline (alternative to pipeline_id)
+        pipeline_id: ID of the pipeline (alternative to pipeline_name)
+        branch: Branch to run on (default: main)
+
+    Returns:
+        Run ID, status, and URL
+    """
+    return ado.trigger_pipeline(organization, project_name, pipeline_name, pipeline_id, branch)
+
+
+# ============================================================================
+# LOG ANALYTICS
+# ============================================================================
+
+@mcp.tool()
+def azure_query_logs(workspace_name: str = None, resource_group: str = None,
+                     query: str = None, timespan: str = "P1D") -> str:
+    """
+    Run a KQL query against a Log Analytics workspace.
+
+    Args:
+        workspace_name: Name of the Log Analytics workspace
+        resource_group: Resource group of the workspace (optional)
+        query: KQL query string
+        timespan: ISO 8601 duration for query time range (default: P1D = 1 day)
+
+    Returns:
+        Query results as JSON
+    """
+    return azure.query_logs(workspace_name, resource_group, query, timespan)
+
+
+# ============================================================================
+# FABRIC WORKSPACES
+# ============================================================================
+
+@mcp.tool()
+def fabric_list_workspaces() -> str:
+    """
+    List all Microsoft Fabric workspaces accessible to the current user.
+
+    Returns:
+        List of workspaces with IDs and capacity info
+    """
+    return fabric.list_workspaces()
+
+
+# ============================================================================
 # ENTRY POINT
 # ============================================================================
 

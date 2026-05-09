@@ -29,6 +29,39 @@ def list_permissions(user_principal_name: str = None) -> str:
         return f"Fabric permissions list failed\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nScript: {script_path}\n\nCommon causes:\n- Not authenticated: Run 'az login'\n- No Fabric access\n- Invalid user principal name\n- Fabric API unavailable"
 
 
+def list_workspaces() -> str:
+    """Lists all Microsoft Fabric workspaces accessible to the current user."""
+    ps_executable = "pwsh" if shutil.which("pwsh") else "powershell"
+    script_content = """
+$tokenResponse = az account get-access-token --resource https://analysis.windows.net/powerbi/api | ConvertFrom-Json
+if (-not $tokenResponse -or -not $tokenResponse.accessToken) { Write-Error "AUTH_FAILED: Could not get Fabric token"; exit 1 }
+$headers = @{ "Authorization" = "Bearer $($tokenResponse.accessToken)"; "Content-Type" = "application/json" }
+$response = Invoke-RestMethod -Uri "https://api.fabric.microsoft.com/v1/workspaces" -Method Get -Headers $headers
+$workspaces = $response.value | Select-Object id, displayName, type, capacityId
+$workspaces | ConvertTo-Json -Depth 3
+"""
+    result = run_command([ps_executable, "-ExecutionPolicy", "Bypass", "-Command", script_content])
+    
+    if "AUTH_FAILED" in result or "error" in result.lower():
+        return f"Failed to list Fabric workspaces:\n{result}"
+    
+    try:
+        workspaces = json.loads(result)
+        if not workspaces:
+            return "No Fabric workspaces found for the current user."
+        
+        output = [f"Found {len(workspaces)} workspace(s):", ""]
+        for ws in workspaces:
+            output.append(f"  {ws.get('displayName', 'N/A')}")
+            output.append(f"    ID: {ws.get('id', 'N/A')}")
+            if ws.get('capacityId'):
+                output.append(f"    Capacity: {ws['capacityId']}")
+            output.append("")
+        return "\n".join(output)
+    except (json.JSONDecodeError, ValueError):
+        return result
+
+
 def create_managed_private_endpoint(
     workspace_id: str,
     endpoint_name: str,

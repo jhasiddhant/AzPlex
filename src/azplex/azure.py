@@ -2687,3 +2687,173 @@ Optional:
     output_lines.append(result)
     
     return "\n".join(output_lines)
+
+
+# ============================================================================
+# IDENTITY LOOKUP
+# ============================================================================
+
+def lookup_identity(identifier: str, identity_type: str = None) -> str:
+    """Look up a user, group, or service principal by email/name and return Object ID."""
+    if not identifier or not identifier.strip():
+        return "Error: Please provide an identifier (email, display name, or app name) to look up."
+    
+    identifier = identifier.strip()
+    results = []
+    
+    # Auto-detect type or try all if not specified
+    types_to_try = []
+    if identity_type:
+        types_to_try = [identity_type.lower()]
+    elif "@" in identifier:
+        types_to_try = ["user"]
+    else:
+        types_to_try = ["user", "group", "serviceprincipal"]
+    
+    for id_type in types_to_try:
+        if id_type == "user":
+            cmd = ["az", "ad", "user", "list", "--filter",
+                   f"mail eq '{identifier}' or userPrincipalName eq '{identifier}' or displayName eq '{identifier}'",
+                   "--query", "[].{displayName:displayName, objectId:id, userPrincipalName:userPrincipalName, type:'User'}",
+                   "-o", "json"]
+        elif id_type == "group":
+            cmd = ["az", "ad", "group", "list", "--filter",
+                   f"displayName eq '{identifier}'",
+                   "--query", "[].{displayName:displayName, objectId:id, type:'Group'}",
+                   "-o", "json"]
+        elif id_type == "serviceprincipal":
+            cmd = ["az", "ad", "sp", "list", "--filter",
+                   f"displayName eq '{identifier}'",
+                   "--query", "[].{displayName:displayName, objectId:id, appId:appId, type:'ServicePrincipal'}",
+                   "-o", "json"]
+        else:
+            continue
+        
+        result = run_command(cmd)
+        if "error" not in result.lower():
+            try:
+                items = json.loads(result)
+                if items:
+                    results.extend(items)
+            except (json.JSONDecodeError, ValueError):
+                pass
+    
+    if not results:
+        return f"No identity found matching '{identifier}'. Try:\n- Exact email (user@domain.com)\n- Exact display name\n- For service principals, use the app registration display name"
+    
+    output = [f"Found {len(results)} result(s) for '{identifier}':", ""]
+    for item in results:
+        output.append(f"  Display Name: {item.get('displayName', 'N/A')}")
+        output.append(f"  Object ID:    {item.get('objectId', 'N/A')}")
+        if item.get('userPrincipalName'):
+            output.append(f"  UPN:          {item['userPrincipalName']}")
+        if item.get('appId'):
+            output.append(f"  App ID:       {item['appId']}")
+        output.append(f"  Type:         {item.get('type', 'Unknown')}")
+        output.append("")
+    
+    return "\n".join(output)
+
+
+# ============================================================================
+# DELETE OPERATIONS
+# ============================================================================
+
+def delete_resource(resource_id: str = None, resource_name: str = None,
+                    resource_group: str = None, resource_type: str = None) -> str:
+    """Delete an Azure resource by ID or by name+RG+type."""
+    if resource_id:
+        cmd = ["az", "resource", "delete", "--ids", resource_id]
+    elif resource_name and resource_group:
+        if resource_type and resource_type in RESOURCE_TYPE_PROVIDER_MAP:
+            provider = RESOURCE_TYPE_PROVIDER_MAP[resource_type]
+            cmd = ["az", "resource", "delete", "-g", resource_group,
+                   "-n", resource_name, "--resource-type", provider]
+        else:
+            return ("Error: resource_type is required when deleting by name. "
+                    "Provide the resource type (e.g., 'storage-account', 'key-vault').")
+    else:
+        return "Error: Provide either resource_id OR (resource_name + resource_group + resource_type)."
+    
+    result = run_command(cmd)
+    if "error" in result.lower():
+        return f"Delete failed:\n{result}"
+    
+    name = resource_name or (resource_id.split("/")[-1] if resource_id else "unknown")
+    return f"Successfully deleted resource: {name}"
+
+
+def delete_resource_group(resource_group: str) -> str:
+    """Delete an Azure resource group and all its contents."""
+    if not resource_group or not resource_group.strip():
+        return "Error: resource_group name is required."
+    
+    cmd = ["az", "group", "delete", "-n", resource_group, "--yes", "--no-wait"]
+    result = run_command(cmd)
+    
+    if "error" in result.lower():
+        return f"Delete failed:\n{result}"
+    
+    return f"Resource group '{resource_group}' deletion initiated (async). It may take a few minutes to complete."
+
+
+# ============================================================================
+# PIM DEACTIVATION
+# ============================================================================
+
+def deactivate_pim_role(subscription_name: str = None, role_name: str = None,
+                        resource_group_name: str = None) -> str:
+    """Deactivate an active PIM role."""
+    if not role_name:
+        return "Error: role_name is required. Specify which role to deactivate."
+    if not subscription_name:
+        return "Error: subscription_name is required. Specify the subscription scope."
+    
+    script_path = get_script_path("activate-pim.ps1")
+    if not os.path.exists(script_path):
+        return "Error: activate-pim.ps1 not found"
+    
+    params = {
+        "Action": "deactivate",
+        "RoleName": role_name,
+        "SubscriptionName": subscription_name
+    }
+    if resource_group_name:
+        params["ResourceGroupName"] = resource_group_name
+    
+    return run_powershell_script(script_path, params)
+
+
+# ============================================================================
+# LOG ANALYTICS QUERY
+# ============================================================================
+
+def query_logs(workspace_name: str = None, resource_group: str = None,
+               query: str = None, timespan: str = "P1D") -> str:
+    """Run a KQL query against a Log Analytics workspace."""
+    if not query:
+        return "Error: A KQL query string is required."
+    if not workspace_name:
+        return "Error: workspace_name is required."
+    
+    cmd = [
+        "az", "monitor", "log-analytics", "query",
+        "--workspace", workspace_name,
+        "--analytics-query", query,
+        "--timespan", timespan,
+        "-o", "json"
+    ]
+    if resource_group:
+        cmd.extend(["--resource-group", resource_group])
+    
+    result = run_command(cmd)
+    if "error" in result.lower():
+        return f"Query failed:\n{result}"
+    
+    try:
+        data = json.loads(result)
+        if isinstance(data, list) and len(data) == 0:
+            return "Query returned 0 results."
+        return json.dumps(data, indent=2)
+    except (json.JSONDecodeError, ValueError):
+        return result
