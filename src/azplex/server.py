@@ -394,34 +394,32 @@ def azure_set_subscription(subscription_id: str = None, subscription_name: str =
 
 
 @mcp.tool()
-def azure_update_tags(
+def azure_manage_resource(
+    action: str = None,
     resource_id: str = None,
     resource_name: str = None,
     resource_group: str = None,
     resource_type: str = None,
     tags: str = None,
-    operation: str = "merge"
+    tag_operation: str = "merge"
 ) -> str:
     """
-    Adds, updates, or replaces tags on an Azure resource.
-    
-    IMPORTANT: Before calling this tool, ask the user for:
-    1. The resource to tag (resource_id OR resource_name + resource_group)
-    2. The tag key-value pairs in format: "key1=value1,key2=value2"
-    3. Whether to merge with existing tags or replace all tags
-    
+    Perform lifecycle or modification actions on an Azure resource.
+    Supports: start, stop, restart, deallocate, update-tags.
+
     Args:
-        resource_id: Full resource ID (preferred if available)
-        resource_name: Resource name (requires resource_group)
+        action: The action to perform - one of: start, stop, restart, deallocate, update-tags
+        resource_id: Full ARM resource ID (preferred if available)
+        resource_name: Resource name (requires resource_group + resource_type)
         resource_group: Resource group name
-        resource_type: Resource type short name (nsg, vnet, kv, storage-account, etc.)
-        tags: Tag in format "key1=value1,key2=value2"
-        operation: "merge" (add/update, keep existing) or "replace" (remove all existing, set new)
-    
+        resource_type: Resource type short name (vm, webapp, aks, storage-account, etc.)
+        tags: For update-tags action only - tags in format "key1=value1,key2=value2"
+        tag_operation: For update-tags action only - "merge" (default) or "replace"
+
     Returns:
-        Tag update status
+        Action result or error
     """
-    return azure.update_tags(resource_id, resource_name, resource_group, resource_type, tags, operation)
+    return azure.manage_resource(action, resource_id, resource_name, resource_group, resource_type, tags, tag_operation)
 
 
 @mcp.tool()

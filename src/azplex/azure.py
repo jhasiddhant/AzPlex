@@ -350,33 +350,90 @@ def query_resources(
         })
 
 
-def update_tags(
+def manage_resource(
+    action: str,
     resource_id: str = None,
     resource_name: str = None,
     resource_group: str = None,
     resource_type: str = None,
     tags: str = None,
-    operation: str = "merge"
+    tag_operation: str = "merge"
 ) -> str:
-    """Adds, updates, or replaces tags on an Azure resource."""
-    if not tags:
-        return json.dumps({"error": "tags parameter is required in format 'key1=value1,key2=value2'"})
+    """Perform lifecycle or modification actions on an Azure resource."""
+    VALID_ACTIONS = ["start", "stop", "restart", "deallocate", "update-tags"]
     
+    if not action:
+        return f"Error: action is required. Valid actions: {', '.join(VALID_ACTIONS)}"
+    action = action.lower().strip()
+    if action not in VALID_ACTIONS:
+        return f"Error: Invalid action '{action}'. Valid actions: {', '.join(VALID_ACTIONS)}"
+    
+    # --- update-tags branch (delegates to PowerShell script) ---
+    if action == "update-tags":
+        if not tags:
+            return "Error: tags parameter is required in format 'key1=value1,key2=value2'"
+        if not resource_id and not (resource_name and resource_group):
+            return "Error: Either resource_id OR (resource_name + resource_group) is required"
+        params = {"Tags": tags, "Operation": tag_operation}
+        if resource_id:
+            params["ResourceId"] = resource_id
+        if resource_name:
+            params["ResourceName"] = resource_name
+        if resource_group:
+            params["ResourceGroup"] = resource_group
+        if resource_type:
+            params["ResourceType"] = resource_type
+        script_path = get_script_path("update-tags.ps1")
+        return run_powershell_script(script_path, params)
+    
+    # --- lifecycle actions (start/stop/restart/deallocate) ---
     if not resource_id and not (resource_name and resource_group):
-        return json.dumps({"error": "Either resource_id OR (resource_name + resource_group) is required"})
+        return "Error: Either resource_id OR (resource_name + resource_group + resource_type) is required"
     
-    params = {"Tags": tags, "Operation": operation}
+    # Build the resource ID if not provided
     if resource_id:
-        params["ResourceId"] = resource_id
-    if resource_name:
-        params["ResourceName"] = resource_name
-    if resource_group:
-        params["ResourceGroup"] = resource_group
-    if resource_type:
-        params["ResourceType"] = resource_type
+        target = resource_id
+    else:
+        if not resource_type:
+            return "Error: resource_type is required when using resource_name + resource_group"
+        provider = RESOURCE_TYPE_PROVIDER_MAP.get(resource_type.lower())
+        if not provider:
+            return f"Error: Unknown resource_type '{resource_type}'. Valid types: {', '.join(sorted(RESOURCE_TYPE_PROVIDER_MAP.keys()))}"
+        # Get the resource ID via az resource show
+        show_cmd = ["az", "resource", "show", "-g", resource_group,
+                    "-n", resource_name, "--resource-type", provider,
+                    "--query", "id", "-o", "tsv"]
+        target = run_command(show_cmd).strip()
+        if not target or "error" in target.lower():
+            return f"Error: Could not find resource '{resource_name}' in '{resource_group}': {target}"
     
-    script_path = get_script_path("update-tags.ps1")
-    return run_powershell_script(script_path, params)
+    # Execute the action via az resource invoke-action or type-specific commands
+    # Detect resource type from ID for type-specific handling
+    target_lower = target.lower()
+    if "/microsoft.compute/virtualmachines/" in target_lower or target_lower.endswith("/microsoft.compute/virtualmachines"):
+        cmd = ["az", "vm", action, "--ids", target]
+        if action == "deallocate":
+            cmd = ["az", "vm", "deallocate", "--ids", target]
+    elif "/microsoft.web/sites/" in target_lower:
+        cmd = ["az", "webapp", action, "--ids", target]
+    elif "/microsoft.containerservice/managedclusters/" in target_lower:
+        cmd = ["az", "aks", action, "--ids", target] if action in ["start", "stop"] else None
+    elif "/microsoft.sql/servers/" in target_lower:
+        # SQL doesn't support restart directly
+        cmd = None
+    else:
+        # Generic: try az resource invoke-action
+        cmd = ["az", "resource", "invoke-action", "--ids", target, "--action", action]
+    
+    if cmd is None:
+        return f"Error: Action '{action}' is not supported for this resource type."
+    
+    result = run_command(cmd)
+    if "error" in result.lower():
+        return f"Action '{action}' failed:\n{result}"
+    
+    name = resource_name or target.split("/")[-1]
+    return f"Successfully executed '{action}' on resource: {name}"
 
 
 def get_activity_log(
