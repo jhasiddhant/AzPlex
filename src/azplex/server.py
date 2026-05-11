@@ -1558,6 +1558,50 @@ def ado_trigger_pipeline(organization: str = None, project_name: str = None,
 
 
 # ============================================================================
+# ADO WORK ITEMS
+# ============================================================================
+
+@mcp.tool()
+def ado_manage_work_item(
+    organization: str = None,
+    project_name: str = None,
+    action: str = None,
+    work_item_id: int = None,
+    work_item_type: str = None,
+    title: str = None,
+    fields: str = None,
+    comment: str = None
+) -> str:
+    """
+    Create, read, update, or comment on Azure DevOps work items.
+
+    Actions:
+      - create: Create a new work item (requires work_item_type + title)
+      - read: Get full details of a work item (requires work_item_id)
+      - update: Update fields on a work item (requires work_item_id + fields or title)
+      - add-comment: Add a discussion comment (requires work_item_id + comment)
+
+    Args:
+        organization: Azure DevOps organization URL or name
+        project_name: Project name
+        action: One of: create, read, update, add-comment
+        work_item_id: ID of existing work item (for read/update/add-comment)
+        work_item_type: Type for create (Task, Bug, User Story, Epic, Feature)
+        title: Title for create or update
+        fields: Comma-separated key=value pairs for field updates. Keys can be friendly
+                names: state, assigned_to, area_path, iteration_path, priority, activity,
+                completed_work, remaining_work, original_estimate, start_date, target_date,
+                story_points, effort, tags, description, severity, value_area
+        comment: Discussion comment text (for add-comment action)
+
+    Returns:
+        Work item details, creation confirmation, or update status
+    """
+    return ado.manage_work_item(organization, project_name, action, work_item_id,
+                                work_item_type, title, fields, comment)
+
+
+# ============================================================================
 # LOG ANALYTICS
 # ============================================================================
 

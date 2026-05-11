@@ -522,3 +522,232 @@ def trigger_pipeline(organization: str = None, project_name: str = None,
         return "\n".join(output)
     except (json.JSONDecodeError, ValueError):
         return f"Pipeline triggered. Output:\n{result}"
+
+
+# ============================================================================
+# Azure DevOps - Work Items
+# ============================================================================
+
+# Field name mapping for convenience
+_WORK_ITEM_FIELDS = {
+    "title": "System.Title",
+    "state": "System.State",
+    "status": "System.State",
+    "assigned_to": "System.AssignedTo",
+    "assigned": "System.AssignedTo",
+    "area_path": "System.AreaPath",
+    "area": "System.AreaPath",
+    "iteration_path": "System.IterationPath",
+    "iteration": "System.IterationPath",
+    "description": "System.Description",
+    "priority": "Microsoft.VSTS.Common.Priority",
+    "severity": "Microsoft.VSTS.Common.Severity",
+    "activity": "Microsoft.VSTS.Common.Activity",
+    "completed_work": "Microsoft.VSTS.Scheduling.CompletedWork",
+    "remaining_work": "Microsoft.VSTS.Scheduling.RemainingWork",
+    "original_estimate": "Microsoft.VSTS.Scheduling.OriginalEstimate",
+    "start_date": "Microsoft.VSTS.Scheduling.StartDate",
+    "target_date": "Microsoft.VSTS.Scheduling.TargetDate",
+    "tags": "System.Tags",
+    "reason": "System.Reason",
+    "value_area": "Microsoft.VSTS.Common.ValueArea",
+    "story_points": "Microsoft.VSTS.Scheduling.StoryPoints",
+    "effort": "Microsoft.VSTS.Scheduling.Effort",
+}
+
+
+def manage_work_item(
+    organization: str = None,
+    project_name: str = None,
+    action: str = None,
+    work_item_id: int = None,
+    work_item_type: str = None,
+    title: str = None,
+    fields: str = None,
+    comment: str = None
+) -> str:
+    """Manage Azure DevOps work items - create, read, update, or add comments."""
+    organization = _normalize_org_url(organization)
+
+    VALID_ACTIONS = ["create", "read", "update", "add-comment"]
+
+    if not action:
+        return f"Error: action is required. Valid actions: {', '.join(VALID_ACTIONS)}"
+    action = action.lower().strip()
+    if action not in VALID_ACTIONS:
+        return f"Error: Invalid action '{action}'. Valid actions: {', '.join(VALID_ACTIONS)}"
+
+    missing = []
+    if not organization or not organization.strip():
+        missing.append("organization (org URL or name)")
+    if not project_name or not project_name.strip():
+        missing.append("project_name")
+    if missing:
+        return f"Work Item ({action}) - Missing:\n" + "\n".join([f"  - {m}" for m in missing])
+
+    from .utils import run_command
+
+    # ---- CREATE ----
+    if action == "create":
+        if not work_item_type:
+            return "Error: work_item_type is required for create (e.g., 'Task', 'Bug', 'User Story', 'Epic', 'Feature')"
+        if not title:
+            return "Error: title is required for create"
+
+        cmd = ["az", "boards", "work-item", "create",
+               "--type", work_item_type,
+               "--title", title,
+               "--org", organization,
+               "--project", project_name,
+               "-o", "json"]
+
+        # Parse additional fields
+        if fields:
+            for field_entry in fields.split(","):
+                field_entry = field_entry.strip()
+                if "=" not in field_entry:
+                    continue
+                key, value = field_entry.split("=", 1)
+                key = key.strip().lower().replace(" ", "_")
+                field_ref = _WORK_ITEM_FIELDS.get(key, key)
+                # If it looks like a System.* or Microsoft.* path, use as-is
+                if "." in field_ref and not field_ref.startswith(("System.", "Microsoft.")):
+                    field_ref = _WORK_ITEM_FIELDS.get(key, key)
+                cmd.extend(["--fields", f"{field_ref}={value.strip()}"])
+
+        result = run_command(cmd)
+        if "error" in result.lower():
+            return f"Create failed:\n{result}"
+
+        try:
+            data = json.loads(result)
+            wi_id = data.get("id", "N/A")
+            url = data.get("_links", {}).get("html", {}).get("href", "")
+            output = [f"Work item created successfully!",
+                      f"  ID: {wi_id}",
+                      f"  Type: {work_item_type}",
+                      f"  Title: {title}"]
+            if url:
+                output.append(f"  URL: {url}")
+            return "\n".join(output)
+        except (json.JSONDecodeError, ValueError):
+            return result
+
+    # ---- READ ----
+    if action == "read":
+        if not work_item_id:
+            return "Error: work_item_id is required for read"
+
+        cmd = ["az", "boards", "work-item", "show",
+               "--id", str(work_item_id),
+               "--org", organization,
+               "-o", "json"]
+
+        result = run_command(cmd)
+        if "error" in result.lower():
+            return f"Read failed:\n{result}"
+
+        try:
+            data = json.loads(result)
+            f = data.get("fields", {})
+            output = [
+                f"Work Item #{data.get('id', 'N/A')}",
+                f"  Title:          {f.get('System.Title', 'N/A')}",
+                f"  Type:           {f.get('System.WorkItemType', 'N/A')}",
+                f"  State:          {f.get('System.State', 'N/A')}",
+                f"  Reason:         {f.get('System.Reason', 'N/A')}",
+                f"  Assigned To:    {f.get('System.AssignedTo', {}).get('displayName', 'Unassigned') if isinstance(f.get('System.AssignedTo'), dict) else f.get('System.AssignedTo', 'Unassigned')}",
+                f"  Area Path:      {f.get('System.AreaPath', 'N/A')}",
+                f"  Iteration Path: {f.get('System.IterationPath', 'N/A')}",
+                f"  Priority:       {f.get('Microsoft.VSTS.Common.Priority', 'N/A')}",
+                f"  Activity:       {f.get('Microsoft.VSTS.Common.Activity', 'N/A')}",
+                f"  Story Points:   {f.get('Microsoft.VSTS.Scheduling.StoryPoints', 'N/A')}",
+                f"  Effort:         {f.get('Microsoft.VSTS.Scheduling.Effort', 'N/A')}",
+                f"  Original Est:   {f.get('Microsoft.VSTS.Scheduling.OriginalEstimate', 'N/A')}",
+                f"  Completed Work: {f.get('Microsoft.VSTS.Scheduling.CompletedWork', 'N/A')}",
+                f"  Remaining Work: {f.get('Microsoft.VSTS.Scheduling.RemainingWork', 'N/A')}",
+                f"  Start Date:     {f.get('Microsoft.VSTS.Scheduling.StartDate', 'N/A')}",
+                f"  Target Date:    {f.get('Microsoft.VSTS.Scheduling.TargetDate', 'N/A')}",
+                f"  Tags:           {f.get('System.Tags', 'N/A')}",
+                f"  Created By:     {f.get('System.CreatedBy', {}).get('displayName', 'N/A') if isinstance(f.get('System.CreatedBy'), dict) else f.get('System.CreatedBy', 'N/A')}",
+                f"  Created Date:   {f.get('System.CreatedDate', 'N/A')}",
+                f"  Changed Date:   {f.get('System.ChangedDate', 'N/A')}",
+            ]
+            desc = f.get("System.Description", "")
+            if desc:
+                # Strip HTML for readability
+                import re
+                desc_clean = re.sub(r"<[^>]+>", "", desc).strip()
+                output.append(f"  Description:    {desc_clean[:500]}")
+
+            # Fetch comments
+            comments_url = data.get("_links", {}).get("workItemComments", {}).get("href", "")
+            if comments_url:
+                comment_cmd = ["az", "boards", "work-item", "show",
+                               "--id", str(work_item_id),
+                               "--org", organization,
+                               "--expand", "all", "-o", "json"]
+                # Use discussion separately
+                disc_cmd = ["az", "boards", "work-item", "relation", "list-for-work-item",
+                            "--id", str(work_item_id),
+                            "--org", organization, "-o", "json"]
+
+            return "\n".join(output)
+        except (json.JSONDecodeError, ValueError):
+            return result
+
+    # ---- UPDATE ----
+    if action == "update":
+        if not work_item_id:
+            return "Error: work_item_id is required for update"
+        if not fields and not title:
+            return "Error: Provide 'fields' (key=value,key2=value2) or 'title' to update"
+
+        cmd = ["az", "boards", "work-item", "update",
+               "--id", str(work_item_id),
+               "--org", organization,
+               "-o", "json"]
+
+        if title:
+            cmd.extend(["--title", title])
+
+        if fields:
+            for field_entry in fields.split(","):
+                field_entry = field_entry.strip()
+                if "=" not in field_entry:
+                    continue
+                key, value = field_entry.split("=", 1)
+                key = key.strip().lower().replace(" ", "_")
+                field_ref = _WORK_ITEM_FIELDS.get(key, key)
+                cmd.extend(["--fields", f"{field_ref}={value.strip()}"])
+
+        result = run_command(cmd)
+        if "error" in result.lower():
+            return f"Update failed:\n{result}"
+
+        try:
+            data = json.loads(result)
+            return f"Work item #{work_item_id} updated successfully."
+        except (json.JSONDecodeError, ValueError):
+            return result
+
+    # ---- ADD-COMMENT ----
+    if action == "add-comment":
+        if not work_item_id:
+            return "Error: work_item_id is required for add-comment"
+        if not comment:
+            return "Error: comment text is required for add-comment"
+
+        cmd = ["az", "boards", "work-item", "update",
+               "--id", str(work_item_id),
+               "--org", organization,
+               "--discussion", comment,
+               "-o", "json"]
+
+        result = run_command(cmd)
+        if "error" in result.lower():
+            return f"Add comment failed:\n{result}"
+
+        return f"Comment added to work item #{work_item_id}."
+
+    return "Error: Unexpected state."
