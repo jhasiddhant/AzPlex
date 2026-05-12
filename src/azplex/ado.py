@@ -4,7 +4,6 @@
 
 import os
 import json
-from typing import Optional
 
 try:
     from .utils import (
@@ -679,18 +678,6 @@ def manage_work_item(
                 import re
                 desc_clean = re.sub(r"<[^>]+>", "", desc).strip()
                 output.append(f"  Description:    {desc_clean[:500]}")
-
-            # Fetch comments
-            comments_url = data.get("_links", {}).get("workItemComments", {}).get("href", "")
-            if comments_url:
-                comment_cmd = ["az", "boards", "work-item", "show",
-                               "--id", str(work_item_id),
-                               "--org", organization,
-                               "--expand", "all", "-o", "json"]
-                # Use discussion separately
-                disc_cmd = ["az", "boards", "work-item", "relation", "list-for-work-item",
-                            "--id", str(work_item_id),
-                            "--org", organization, "-o", "json"]
 
             return "\n".join(output)
         except (json.JSONDecodeError, ValueError):

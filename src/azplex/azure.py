@@ -7,25 +7,20 @@ import re
 import json
 import shutil
 import subprocess
-from typing import Optional, Dict
 
 try:
     from .utils import (
         run_command, run_powershell_script, get_script_path, get_template_path,
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
-        NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
-        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP,
-        RESOURCE_VARIANTS
+        PRIVATE_DNS_ZONE_MAP, RESOURCE_VARIANTS
     )
 except ImportError:
     from utils import (
         run_command, run_powershell_script, get_script_path, get_template_path,
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
-        NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
-        get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP,
-        RESOURCE_VARIANTS
+        PRIVATE_DNS_ZONE_MAP, RESOURCE_VARIANTS
     )
 
 
@@ -1374,85 +1369,6 @@ PARAM_DESCRIPTIONS = {
 }
 
 
-def get_bicep_requirements(resource_type: str) -> str:
-    """Returns required/optional params for a Bicep template in a formatted display."""
-    # Check if the resource type has variants - ask user to specify first
-    if resource_type in RESOURCE_VARIANTS:
-        variants = RESOURCE_VARIANTS[resource_type]
-        response = []
-        response.append("=" * 70)
-        response.append(f"  {resource_type.upper()} - SELECT VARIANT")
-        response.append("=" * 70)
-        response.append("")
-        response.append("This resource has multiple options. Choose one first:")
-        response.append("")
-        for variant_key, variant_desc in variants.items():
-            response.append(f"  [{variant_key}]")
-            response.append(f"      {variant_desc}")
-            response.append("")
-        response.append("=" * 70)
-        return "\n".join(response)
-    
-    if resource_type not in TEMPLATE_MAP:
-        return f"Unknown resource_type. Valid: {', '.join(sorted(TEMPLATE_MAP.keys()))}"
-    
-    template_path = get_template_path(TEMPLATE_MAP[resource_type])
-    params, param_metadata = parse_bicep_parameters(template_path)
-    
-    auto_calculated = []
-    if resource_type == "fabric-capacity":
-        auto_calculated.append("location")
-        tenant_region = get_fabric_tenant_region()
-    
-    required = [p for p, (req, _) in params.items() if req and p not in auto_calculated]
-    optional = [(p, params[p][1]) for p, (req, _) in params.items() if not req and p not in auto_calculated]
-    
-    response = []
-    response.append("=" * 70)
-    response.append(f"  {resource_type.upper()} - PARAMETERS")
-    response.append("=" * 70)
-    response.append("")
-    
-    response.append("REQUIRED")
-    response.append("-" * 70)
-    response.append(f"  {'Parameter':<28} {'Description':<30} {'Example'}")
-    response.append("-" * 70)
-    for param in required:
-        desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
-        response.append(f"  {param:<28} {desc:<30} {example}")
-        meta = param_metadata.get(param, {})
-        allowed = meta.get('allowed', [])
-        if allowed:
-            response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
-    response.append("")
-    
-    if optional:
-        response.append("OPTIONAL (with defaults)")
-        response.append("-" * 70)
-        response.append(f"  {'Parameter':<28} {'Default':<15} {'Example'}")
-        response.append("-" * 70)
-        for param, default in optional:
-            if param in auto_calculated:
-                continue
-            desc, example = PARAM_DESCRIPTIONS.get(param, (param, ""))
-            default_str = str(default) if default else "-"
-            response.append(f"  {param:<28} {default_str:<15} {example}")
-            meta = param_metadata.get(param, {})
-            allowed = meta.get('allowed', [])
-            if allowed:
-                response.append(f"  {'':<28} Allowed: {', '.join(allowed)}")
-        response.append("")
-    
-    if resource_type == "fabric-capacity":
-        region = tenant_region if tenant_region else "westcentralus"
-        response.append(f"AUTO-DETECTED: location = {region}")
-        response.append("")
-    
-    response.append("=" * 70)
-    
-    return "\n".join(response)
-
-
 def create_resource(resource_type: str, resource_group: str = None, parameters: str = None) -> str:
     """Interactive Azure resource creation with formatted parameter prompts."""
     # Check if the resource type has variants that require user choice
@@ -1484,6 +1400,61 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
         except json.JSONDecodeError:
             return f"Error: Invalid JSON in parameters: {parameters}"
     
+    # Delegate to specialized functions for complex resource types
+    if resource_type in ("container-apps-env", "container-apps-environment", "aca-env"):
+        return create_container_apps_environment(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            environment_name=params_dict.get("environmentName") or params_dict.get("environment_name"),
+            subnet_id=params_dict.get("infrastructureSubnetId") or params_dict.get("subnet_id"),
+            log_analytics_workspace_id=params_dict.get("logAnalyticsWorkspaceId"),
+            zone_redundant=str(params_dict.get("zoneRedundant", "false")).lower() == "true",
+            workload_profile_type=params_dict.get("workloadProfileType", "Consumption"),
+            internal_only=str(params_dict.get("internalOnly", "false")).lower() == "true"
+        )
+    
+    if resource_type in ("container-app", "containerapp", "aca"):
+        return create_container_app(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            container_app_name=params_dict.get("containerAppName") or params_dict.get("container_app_name"),
+            environment_name=params_dict.get("environmentName") or params_dict.get("environment_name"),
+            target_port=int(params_dict.get("targetPort", 80)),
+            external_ingress=str(params_dict.get("externalIngress", "true")).lower() == "true",
+            cpu=params_dict.get("cpu", "0.5"),
+            memory=params_dict.get("memory", "1Gi"),
+            min_replicas=int(params_dict.get("minReplicas", 0)),
+            max_replicas=int(params_dict.get("maxReplicas", 10)),
+            subnet_id=params_dict.get("subnet_id") or params_dict.get("infrastructureSubnetId")
+        )
+    
+    if resource_type in ("data-collection-endpoint", "dce"):
+        return create_data_collection_endpoint(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            dce_name=params_dict.get("dceName") or params_dict.get("dce_name"),
+            public_network_access=params_dict.get("publicNetworkAccess", "Enabled"),
+            description=params_dict.get("description", "")
+        )
+    
+    if resource_type in ("data-collection-rule", "dcr"):
+        table_columns = params_dict.get("tableColumns") or params_dict.get("table_columns")
+        if isinstance(table_columns, str):
+            try:
+                table_columns = json.loads(table_columns)
+            except (json.JSONDecodeError, ValueError):
+                table_columns = None
+        return create_data_collection_rule(
+            resource_group=resource_group or params_dict.get("resource_group"),
+            dcr_name=params_dict.get("dcrName") or params_dict.get("dcr_name"),
+            workspace_name=params_dict.get("workspaceName") or params_dict.get("workspace_name"),
+            dce_name=params_dict.get("dceName") or params_dict.get("dce_name"),
+            custom_table_base_name=params_dict.get("customTableBaseName") or params_dict.get("custom_table_base_name"),
+            table_columns=table_columns,
+            create_table=str(params_dict.get("createTable", "true")).lower() == "true",
+            workspace_resource_group=params_dict.get("workspaceResourceGroup"),
+            dce_resource_group=params_dict.get("dceResourceGroup"),
+            retention_in_days=int(params_dict.get("retentionInDays", 90)),
+            total_retention_in_days=int(params_dict.get("totalRetentionInDays", 180))
+        )
+
     template_path = get_template_path(TEMPLATE_MAP[resource_type])
     template_params, param_metadata = parse_bicep_parameters(template_path)
     

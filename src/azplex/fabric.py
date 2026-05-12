@@ -5,7 +5,6 @@
 import os
 import json
 import shutil
-from typing import Optional
 
 try:
     from .utils import run_powershell_script, run_command, get_script_path

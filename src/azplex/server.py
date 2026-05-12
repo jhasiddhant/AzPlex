@@ -553,18 +553,6 @@ def azure_attach_appinsights(
 # ============================================================================
 
 @mcp.tool()
-def azure_get_bicep_requirements(resource_type: str) -> str:
-    """(Bicep Path) Returns required/optional params for a Bicep template.
-    
-    IMPORTANT: For resources with hosting variants, always use the BASE type first:
-    - For function apps: use 'function-app' (NOT 'function-app-flex' or 'function-app-appserviceplan')
-    This returns the available hosting options for the user to choose from.
-    Only use the specific variant AFTER the user has explicitly chosen one.
-    """
-    return azure.get_bicep_requirements(resource_type)
-
-
-@mcp.tool()
 def azure_create_resource(resource_type: str, resource_group: str = None, parameters: str = None) -> str:
     """Interactive Azure resource creation using Bicep templates.
     
@@ -573,13 +561,20 @@ def azure_create_resource(resource_type: str, resource_group: str = None, parame
     This returns the available hosting options for the user to choose from.
     Only use the specific variant AFTER the user has explicitly chosen one.
     
+    Supports all Bicep-templated resources including:
+    - container-app / aca (auto-detects/creates environment)
+    - container-apps-env / aca-env (auto-discovers Log Analytics)
+    - data-collection-endpoint / dce
+    - data-collection-rule / dcr (with custom table creation)
+    - storage-account, key-vault, function-app, vnet, nsg, etc.
+    
     Args:
-        resource_type: Type of resource to create (e.g. storage-account, key-vault, function-app, etc.)
+        resource_type: Type of resource to create (e.g. storage-account, key-vault, container-app, dce, dcr, etc.)
         resource_group: Azure resource group name
         parameters: JSON string of resource-specific parameters
     
     Returns:
-        Deployment status with resource details
+        Deployment status with resource details, or parameter prompt if info is missing
     """
     return azure.create_resource(resource_type, resource_group, parameters)
 
@@ -768,264 +763,8 @@ def azure_integrate_vnet(
 
 
 # ============================================================================
-# CONTAINER APPS TOOLS
+# DCE-DCR ATTACHMENT
 # ============================================================================
-
-@mcp.tool()
-def azure_create_container_apps_env(
-    resource_group: str = None,
-    environment_name: str = None,
-    subnet_id: str = None,
-    zone_redundant: bool = False,
-    workload_profile_type: str = "Consumption",
-    internal_only: bool = False
-) -> str:
-    """
-    Creates a Container Apps Environment with optional VNet integration.
-    
-    PREREQUISITES:
-    - Resource Group must exist (environment uses SAME REGION as RG automatically)
-    - For VNet mode: VNet and subnet must exist
-    
-    REQUIRED INFORMATION (ask user):
-    1. resource_group: Target resource group
-    2. environment_name: Name for the environment
-    
-    Args:
-        resource_group: Resource group name (environment deployed in same region)
-        environment_name: Name for the Container Apps Environment
-        subnet_id: Optional - Full subnet resource ID for VNet integration.
-            If omitted, uses Azure-managed networking. Format:
-            /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
-        zone_redundant: Enable zone redundancy (default: False)
-        workload_profile_type: Consumption, D4, D8, D16, D32, E4, E8, E16, E32 (default: Consumption)
-        internal_only: No public ingress - internal VNet access only (default: False)
-    
-    Returns:
-        Deployment result with environment details
-    
-    Examples:
-        # Basic environment without VNet (Azure-managed networking)
-        azure_create_container_apps_env(
-            resource_group='my-rg',
-            environment_name='my-aca-env'
-        )
-        
-        # Environment with VNet integration
-        azure_create_container_apps_env(
-            resource_group='my-rg',
-            environment_name='my-aca-env',
-            subnet_id='/subscriptions/xxx/resourceGroups/network-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/aca-subnet'
-        )
-        
-        # Zone-redundant with dedicated workload profile
-        azure_create_container_apps_env(
-            resource_group='my-rg',
-            environment_name='my-aca-env',
-            subnet_id='/subscriptions/xxx/.../subnets/aca-subnet',
-            zone_redundant=True,
-            workload_profile_type='D4'
-        )
-    """
-    return azure.create_container_apps_environment(
-        resource_group=resource_group,
-        environment_name=environment_name,
-        subnet_id=subnet_id,
-        log_analytics_workspace_id=None,
-        zone_redundant=zone_redundant,
-        workload_profile_type=workload_profile_type,
-        internal_only=internal_only
-    )
-
-
-@mcp.tool()
-def azure_create_container_app(
-    resource_group: str = None,
-    container_app_name: str = None,
-    environment_name: str = None,
-    target_port: int = 80,
-    external_ingress: bool = True,
-    cpu: str = "0.5",
-    memory: str = "1Gi",
-    min_replicas: int = 0,
-    max_replicas: int = 10,
-    subnet_id: str = None
-) -> str:
-    """
-    Creates a Container App using the default quickstart image. Auto-creates environment if none exists.
-    
-    ENVIRONMENT AUTO-DETECTION & AUTO-CREATION:
-    - If environment_name not provided, tool finds existing environment in the RG
-    - If no environment exists, one is automatically created
-    - Use subnet_id to specify VNet integration when auto-creating environment
-    
-    Args:
-        resource_group: Resource group containing the Container Apps Environment
-        container_app_name: Name for the Container App (2-32 chars)
-        environment_name: Existing environment name (auto-detected/created if not provided)
-        target_port: Port the container listens on (default: 80)
-        external_ingress: Enable public access (default: True)
-        cpu: CPU cores - 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 4 (default: 0.5)
-        memory: Memory - 0.5Gi, 1Gi, 1.5Gi, 2Gi, 3Gi, 3.5Gi, 4Gi, 8Gi (default: 1Gi)
-        min_replicas: Minimum replicas, 0 for scale-to-zero (default: 0)
-        max_replicas: Maximum replicas (default: 10)
-        subnet_id: Optional - subnet for VNet integration when auto-creating environment
-    
-    Returns:
-        Deployment result with Container App details and FQDN
-    
-    Examples:
-        # Basic container app with default image
-        azure_create_container_app(
-            resource_group='my-rg',
-            container_app_name='hello-app'
-        )
-        
-        # Auto-create environment with VNet when none exists
-        azure_create_container_app(
-            resource_group='my-rg',
-            container_app_name='hello-app',
-            subnet_id='/subscriptions/xxx/.../subnets/aca-subnet'
-        )
-        
-        # With custom configuration
-        azure_create_container_app(
-            resource_group='my-rg',
-            container_app_name='my-worker',
-            target_port=8080,
-            cpu='1',
-            memory='2Gi',
-            min_replicas=1,
-            max_replicas=5
-        )
-    """
-    return azure.create_container_app(
-        resource_group=resource_group,
-        container_app_name=container_app_name,
-        environment_name=environment_name,
-        target_port=target_port,
-        external_ingress=external_ingress,
-        cpu=cpu,
-        memory=memory,
-        min_replicas=min_replicas,
-        max_replicas=max_replicas,
-        subnet_id=subnet_id
-    )
-
-
-# ============================================================================
-# DATA COLLECTION ENDPOINT & DATA COLLECTION RULE TOOLS
-# ============================================================================
-
-@mcp.tool()
-def azure_create_data_collection_endpoint(
-    resource_group: str = None,
-    dce_name: str = None,
-    public_network_access: str = "Enabled",
-    description: str = ""
-) -> str:
-    """
-    Creates a Data Collection Endpoint (DCE) for Azure Monitor.
-    
-    DCE is REQUIRED for:
-    - Logs Ingestion API (custom logs)
-    - Azure Monitor Private Link Scope (AMPLS)
-    - VNet-isolated data ingestion
-    
-    CREATE ORDER: DCE must be created BEFORE DCR.
-    
-    Args:
-        resource_group: Target resource group
-        dce_name: Name for the Data Collection Endpoint
-        public_network_access: Enabled (default), Disabled, or SecuredByPerimeter
-        description: Optional description
-    
-    Returns:
-        Deployment result with DCE ID, endpoints (logs, metrics, config)
-    
-    Example:
-        azure_create_data_collection_endpoint(
-            resource_group='monitoring-rg',
-            dce_name='my-dce'
-        )
-    """
-    return azure.create_data_collection_endpoint(
-        resource_group=resource_group,
-        dce_name=dce_name,
-        public_network_access=public_network_access,
-        description=description
-    )
-
-
-@mcp.tool()
-def azure_create_data_collection_rule(
-    resource_group: str = None,
-    dcr_name: str = None,
-    workspace_name: str = None,
-    dce_name: str = None,
-    custom_table_base_name: str = None,
-    table_columns: list = None,
-    create_table: bool = True,
-    workspace_resource_group: str = None,
-    dce_resource_group: str = None,
-    retention_in_days: int = 90,
-    total_retention_in_days: int = 180
-) -> str:
-    """
-    Creates a Data Collection Rule (DCR) with optional custom Log Analytics table.
-    
-    PREREQUISITES:
-    1. Log Analytics Workspace must exist
-    2. Data Collection Endpoint (DCE) must exist - create with azure_create_data_collection_endpoint first
-    
-    CREATE ORDER: DCE → DCR → (optional) attach via azure_attach_dce_to_dcr
-    
-    Args:
-        resource_group: Resource group for the DCR
-        dcr_name: Name for the Data Collection Rule
-        workspace_name: Existing Log Analytics workspace name
-        dce_name: Existing Data Collection Endpoint name
-        custom_table_base_name: Base name for custom table (e.g., 'MyLogs' creates 'MyLogs_CL')
-        table_columns: Column definitions as list. Default: [TimeGenerated, Message]
-            Format: [{"name": "ColumnName", "type": "string|dateTime|int|..."}]
-        create_table: Create the custom table (default: True)
-        workspace_resource_group: RG containing workspace (defaults to resource_group)
-        dce_resource_group: RG containing DCE (defaults to resource_group)
-        retention_in_days: Interactive retention days (default: 90)
-        total_retention_in_days: Total retention including archive (default: 180)
-    
-    Returns:
-        Deployment result with DCR ID, immutable ID, table name, stream name
-    
-    Example:
-        azure_create_data_collection_rule(
-            resource_group='monitoring-rg',
-            dcr_name='my-dcr',
-            workspace_name='my-law',
-            dce_name='my-dce',
-            custom_table_base_name='MyCustomLogs',
-            table_columns=[
-                {"name": "TimeGenerated", "type": "dateTime"},
-                {"name": "RunID", "type": "string"},
-                {"name": "Status", "type": "string"},
-                {"name": "Message", "type": "string"}
-            ]
-        )
-    """
-    return azure.create_data_collection_rule(
-        resource_group=resource_group,
-        dcr_name=dcr_name,
-        workspace_name=workspace_name,
-        dce_name=dce_name,
-        custom_table_base_name=custom_table_base_name,
-        table_columns=table_columns,
-        create_table=create_table,
-        workspace_resource_group=workspace_resource_group,
-        dce_resource_group=dce_resource_group,
-        retention_in_days=retention_in_days,
-        total_retention_in_days=total_retention_in_days
-    )
-
 
 @mcp.tool()
 def azure_attach_dce_to_dcr(
