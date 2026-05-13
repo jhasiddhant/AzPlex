@@ -1,12 +1,16 @@
 # AzPlex
 
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/Siddhant.azplex?label=VS%20Code%20Extension)](https://marketplace.visualstudio.com/items?itemName=Siddhant.azplex)
+[![PyPI](https://img.shields.io/pypi/v/azplex)](https://pypi.org/project/azplex/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **AzPlex** is an [MCP](https://modelcontextprotocol.io/) server for **Azure**, **Azure DevOps**, and **Microsoft Fabric**. It lets you deploy, manage, and orchestrate cloud resources using natural language in VS Code with GitHub Copilot Chat.
 
 ## Install
 
 **Option A — VS Code Extension (recommended):**
 
-Install the [AzPlex extension](https://marketplace.visualstudio.com/items?itemName=jhasiddhant.azplex) from the VS Code Marketplace. It bundles the MCP server automatically.
+Install the [AzPlex extension](https://marketplace.visualstudio.com/items?itemName=Siddhant.azplex) from the VS Code Marketplace. It bundles the MCP server automatically.
 
 **Option B — pip:**
 

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    {name = "Siddhant"}
+    {name = "Siddhant Jha"}
 ]
 dependencies = [
     "mcp>=0.1.0",
