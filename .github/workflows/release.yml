@@ -44,6 +44,7 @@ jobs:
 
       - name: Build package
         run: |
+          mkdir -p pip/src
           cp -r src/azplex pip/src/azplex
           pip install build && cd pip && python -m build
 
