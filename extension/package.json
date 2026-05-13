@@ -3,7 +3,7 @@
   "displayName": "azplex",
   "description": "MCP server for Azure, Microsoft Fabric, and Azure DevOps — deploy, manage, and orchestrate from one interface",
   "version": "1.0.0",
-  "publisher": "siddhant",
+  "publisher": "Siddhant",
   "license": "MIT",
   "repository": {
     "type": "git",
