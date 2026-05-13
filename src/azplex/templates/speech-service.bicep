@@ -36,9 +36,7 @@ param restrictOutboundNetworkAccess bool = true
 
 @description('Allowed FQDNs for outbound when restriction is enabled.')
 // disable-next-line no-hardcoded-env-urls
-param allowedFqdnList array = [
-  'microsoft.com'
-]
+param allowedFqdnList array = []
 
 @description('Optional tags for the resource.')
 param tags object = {}

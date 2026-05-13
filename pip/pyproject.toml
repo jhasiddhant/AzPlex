@@ -6,11 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "azplex"
 version = "1.0.0"
 description = "MCP server for Azure, Microsoft Fabric, and Azure DevOps — deploy, manage, and orchestrate from one interface"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    {name = "Siddhant Jha"}
+    {name = "Siddhant"}
 ]
 dependencies = [
     "mcp>=0.1.0",

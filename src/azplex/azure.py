@@ -7,25 +7,22 @@ import re
 import json
 import shutil
 import subprocess
-from typing import Optional, Dict
 
 try:
     from .utils import (
         run_command, run_powershell_script, get_script_path, get_template_path,
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
-        NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
         get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP,
-        RESOURCE_VARIANTS
+        RESOURCE_VARIANTS, resolve_principal_id
     )
 except ImportError:
     from utils import (
         run_command, run_powershell_script, get_script_path, get_template_path,
         ERROR_KEYWORDS, TEMPLATE_MAP, RESOURCE_TYPE_PROVIDER_MAP, OP_SCRIPTS,
-        NSP_MANDATORY_RESOURCES, LOG_ANALYTICS_MANDATORY_RESOURCES,
         parse_bicep_parameters, validate_bicep_parameters, deploy_bicep,
         get_fabric_tenant_region, PRIVATE_DNS_ZONE_MAP,
-        RESOURCE_VARIANTS
+        RESOURCE_VARIANTS, resolve_principal_id
     )
 
 
@@ -379,6 +376,91 @@ def update_tags(
     return run_powershell_script(script_path, params)
 
 
+def modify_resource(
+    action: str,
+    resource_name: str = None,
+    resource_group: str = None,
+    resource_type: str = None,
+    resource_id: str = None,
+    value: str = None,
+    tags: str = None,
+    tags_operation: str = "merge",
+    # attach params
+    attach_target: str = None,
+    nsp_name: str = None,
+    workspace_id: str = None,
+    app_insights_name: str = None,
+    app_insights_resource_group: str = None,
+    target_app_name: str = None,
+    target_resource_group: str = None,
+    target_type: str = None,
+    dcr_name: str = None,
+    dcr_resource_group: str = None,
+    dce_name: str = None,
+    dce_resource_group: str = None,
+    subscription_id: str = None,
+    # vnet params
+    subnet_id: str = None
+) -> str:
+    """
+    Unified resource modification handler.
+    
+    Actions: tags, start, stop, restart, scale, set-public-access, set-local-auth,
+             vnet-integrate, attach, cli-raw
+    """
+    if not action:
+        return "Error: action is required"
+    
+    action = action.lower().strip()
+    
+    # Tags - handled by existing function
+    if action == "tags":
+        return update_tags(resource_id, resource_name, resource_group, resource_type, tags, tags_operation)
+    
+    # VNet integration - handled by existing function
+    if action == "vnet-integrate":
+        return integrate_vnet(resource_name, resource_group, resource_type, subnet_id)
+    
+    # Attach (nsp, diagnostic_settings, appinsights, dce_to_dcr)
+    if action == "attach":
+        if not attach_target:
+            return "Error: attach_target is required. One of: nsp, diagnostic_settings, appinsights, dce_to_dcr"
+        if attach_target == "nsp":
+            return attach_to_nsp(resource_group, nsp_name, resource_id)
+        elif attach_target == "diagnostic_settings":
+            return attach_diagnostic_settings(resource_group, workspace_id, resource_id)
+        elif attach_target == "appinsights":
+            return attach_appinsights(app_insights_name, app_insights_resource_group,
+                                     target_app_name, target_resource_group, target_type)
+        elif attach_target == "dce_to_dcr":
+            return attach_dce_to_dcr(dcr_name=dcr_name, dcr_resource_group=dcr_resource_group,
+                                     dce_name=dce_name, dce_resource_group=dce_resource_group,
+                                     subscription_id=subscription_id)
+        else:
+            return f"Invalid attach_target '{attach_target}'. Must be: nsp, diagnostic_settings, appinsights, dce_to_dcr"
+    
+    # All other actions - handled by PowerShell script
+    if not resource_name or not resource_group:
+        return "Error: resource_name and resource_group are required"
+    if not resource_type:
+        return "Error: resource_type is required (e.g., webapp, functionapp, storage-account, key-vault, openai, sql-database, redis, acr, containerapp, servicebus, cosmosdb)"
+    
+    script_path = get_script_path("modify-resource.ps1")
+    if not os.path.exists(script_path):
+        return "Error: modify-resource.ps1 not found"
+    
+    params = {
+        "Action": action,
+        "ResourceName": resource_name,
+        "ResourceGroup": resource_group,
+        "ResourceType": resource_type
+    }
+    if value:
+        params["Value"] = value
+    
+    return run_powershell_script(script_path, params)
+
+
 def get_activity_log(
     resource_group: str = None,
     resource_id: str = None,
@@ -535,7 +617,6 @@ def attach_to_nsp(resource_group: str, nsp_name: str = None, resource_id: str = 
     
     output = []
     output.append("Starting NSP Attachment Workflow")
-    output.append("=" * 70)
     output.append("")
     
     output.append("Step 1/3: Checking for existing NSP...")
@@ -597,14 +678,12 @@ def attach_to_nsp(resource_group: str, nsp_name: str = None, resource_id: str = 
     if any(err in result for err in ERROR_KEYWORDS):
         output.append(f"   Failed to attach resource to NSP")
         output.append("")
-        output.append("=" * 70)
         output.append("Error Details:")
         output.append(result)
         return "\n".join(output)
     
     output.append(f"   → Resource attached to NSP '{nsp_name}'")
     output.append("")
-    output.append("=" * 70)
     output.append("Workflow completed")
     output.append("")
     output.append("Network security compliance resolved.")
@@ -627,7 +706,6 @@ def attach_diagnostic_settings(resource_group: str, workspace_id: str = None, re
     
     output = []
     output.append("📊 Starting Log Analytics Configuration Workflow")
-    output.append("=" * 70)
     output.append("")
     
     output.append("Step 1/3: Checking for existing Log Analytics Workspace...")
@@ -699,14 +777,12 @@ def attach_diagnostic_settings(resource_group: str, workspace_id: str = None, re
     if any(err in result for err in ERROR_KEYWORDS):
         output.append(f"   Failed to configure diagnostic settings")
         output.append("")
-        output.append("=" * 70)
         output.append("Error Details:")
         output.append(result)
         return "\n".join(output)
     
     output.append(f"   → Diagnostic settings configured successfully")
     output.append("")
-    output.append("=" * 70)
     output.append("Workflow completed")
     output.append("")
     output.append("Monitoring compliance resolved.")
@@ -1122,9 +1198,7 @@ Expected format:
     }
     
     output_lines = []
-    output_lines.append("=" * 70)
     output_lines.append("CREATING CONTAINER APPS ENVIRONMENT")
-    output_lines.append("=" * 70)
     output_lines.append("")
     output_lines.append(f"  Environment Name: {environment_name}")
     output_lines.append(f"  Resource Group:   {resource_group}")
@@ -1250,9 +1324,7 @@ Optional parameters:
         params["envVars"] = json.dumps(env_vars)
     
     output_lines = []
-    output_lines.append("=" * 70)
     output_lines.append("CREATING CONTAINER APP")
-    output_lines.append("=" * 70)
     output_lines.append("")
     output_lines.append(f"  Container App:   {container_app_name}")
     output_lines.append(f"  Resource Group:  {resource_group}")
@@ -1324,9 +1396,7 @@ def get_bicep_requirements(resource_type: str) -> str:
     if resource_type in RESOURCE_VARIANTS:
         variants = RESOURCE_VARIANTS[resource_type]
         response = []
-        response.append("=" * 70)
         response.append(f"  {resource_type.upper()} - SELECT VARIANT")
-        response.append("=" * 70)
         response.append("")
         response.append("This resource has multiple options. Choose one first:")
         response.append("")
@@ -1334,7 +1404,6 @@ def get_bicep_requirements(resource_type: str) -> str:
             response.append(f"  [{variant_key}]")
             response.append(f"      {variant_desc}")
             response.append("")
-        response.append("=" * 70)
         return "\n".join(response)
     
     if resource_type not in TEMPLATE_MAP:
@@ -1352,9 +1421,7 @@ def get_bicep_requirements(resource_type: str) -> str:
     optional = [(p, params[p][1]) for p, (req, _) in params.items() if not req and p not in auto_calculated]
     
     response = []
-    response.append("=" * 70)
     response.append(f"  {resource_type.upper()} - PARAMETERS")
-    response.append("=" * 70)
     response.append("")
     
     response.append("REQUIRED")
@@ -1392,7 +1459,6 @@ def get_bicep_requirements(resource_type: str) -> str:
         response.append(f"AUTO-DETECTED: location = {region}")
         response.append("")
     
-    response.append("=" * 70)
     
     return "\n".join(response)
 
@@ -1403,9 +1469,7 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
     if resource_type in RESOURCE_VARIANTS:
         variants = RESOURCE_VARIANTS[resource_type]
         response = []
-        response.append("=" * 70)
         response.append(f"  CREATE {resource_type.upper()} - SELECT HOSTING PLAN")
-        response.append("=" * 70)
         response.append("")
         response.append("This resource has multiple hosting options. Please choose one:")
         response.append("")
@@ -1415,7 +1479,6 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
             response.append("")
         response.append("-" * 70)
         response.append(f"Reply with your choice (e.g., '{list(variants.keys())[0]}')")
-        response.append("=" * 70)
         return "\n".join(response)
     
     if resource_type not in TEMPLATE_MAP:
@@ -1446,9 +1509,7 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
     
     if not resource_group or all_missing:
         response = []
-        response.append("=" * 70)
         response.append(f"  CREATE {resource_type.upper()}")
-        response.append("=" * 70)
         response.append("")
         
         # Always show resource group first if missing
@@ -1525,7 +1586,6 @@ def create_resource(resource_type: str, resource_group: str = None, parameters: 
             response.append("         The deployment will run in the background on Azure.")
             response.append("")
         
-        response.append("=" * 70)
         
         return "\n".join(response)
     
@@ -1550,9 +1610,7 @@ def deploy_bicep_resource(resource_group: str, resource_type: str, parameters: d
         _, param_metadata = parse_bicep_parameters(template_path)
         
         response = []
-        response.append("=" * 70)
         response.append(f"  CANNOT DEPLOY {resource_type.upper()} - PARAMETERS NEEDED")
-        response.append("=" * 70)
         response.append("")
         response.append(f"  Resource Group: {resource_group}")
         response.append("")
@@ -1581,9 +1639,7 @@ def deploy_bicep_resource(resource_group: str, resource_type: str, parameters: d
                     response.append(f"      Allowed values: {', '.join(allowed)}")
             response.append("")
         
-        response.append("=" * 70)
         response.append("Please provide the missing/corrected parameters and try again.")
-        response.append("=" * 70)
         return "\n".join(response)
     
     return deploy_bicep(resource_group, resource_type, parameters)
@@ -1754,9 +1810,7 @@ Please use a valid group_id from the above list."""
     actual_link_name = vnet_link_name if vnet_link_name else f"{vnet_name}-link"
     
     output_lines = []
-    output_lines.append("=" * 70)
     output_lines.append("PRIVATE ENDPOINT CREATION WITH DNS")
-    output_lines.append("=" * 70)
     output_lines.append("")
     
     # Check if DNS zone already exists in the same resource group
@@ -1858,9 +1912,7 @@ Please use a valid group_id from the above list."""
         output_lines.append(deploy_result)
     
     output_lines.append("")
-    output_lines.append("=" * 70)
     output_lines.append("SUMMARY")
-    output_lines.append("=" * 70)
     output_lines.append(f"  Private Endpoint: {private_endpoint_name}")
     output_lines.append(f"  Target Resource:  {target_resource_id.split('/')[-1]}")
     output_lines.append(f"  Group ID:         {group_id}")
@@ -1974,9 +2026,7 @@ Example:
                 return "No private endpoint connections found on this resource."
             
             output_lines = []
-            output_lines.append("=" * 70)
             output_lines.append("PRIVATE ENDPOINT CONNECTIONS")
-            output_lines.append("=" * 70)
             output_lines.append("")
             
             pending_count = 0
@@ -2070,9 +2120,7 @@ Or both:
         action_past = "approved" if action == "approve" else "rejected"
         
         output_lines = []
-        output_lines.append("=" * 70)
         output_lines.append(f"{action_title} PRIVATE ENDPOINT CONNECTION")
-        output_lines.append("=" * 70)
         output_lines.append("")
         
         result = run_command(cmd)
@@ -2197,6 +2245,15 @@ To Proceed:
     if isinstance(role_names, str):
         role_names = [role_names]
     
+    # Auto-resolve: accept email, display name, or Object ID for each entry
+    resolved_ids = []
+    for oid in object_ids:
+        resolved_id, resolve_info = resolve_principal_id(oid)
+        if not resolved_id:
+            return f"Error resolving identity '{oid}': {resolve_info}"
+        resolved_ids.append(resolved_id)
+    object_ids = resolved_ids
+    
     # Validate scope format
     if not scope.startswith("/subscriptions/"):
         return f"Invalid scope format. Scope must start with '/subscriptions/<subscription-id>/...'\n\nExamples:\n  - Subscription: /subscriptions/<sub-id>\n  - Resource Group: /subscriptions/<sub-id>/resourceGroups/<rg-name>\n  - Resource: /subscriptions/<sub-id>/resourceGroups/<rg-name>/providers/<provider>/<resource-type>/<resource-name>"
@@ -2317,15 +2374,14 @@ def assign_pim_eligible_role(
     scope: str = None,
     principal_id: str = None,
     role_name: str = None,
-    duration: str = "P1Y",
-    tenant_id: str = None,
-    subscription_id: str = None
+    duration: str = "P365D",
+    justification: str = None
 ) -> str:
     """
-    Assigns a PIM eligible role to a principal using EasyPIM module.
+    Assigns a PIM eligible role to a principal using native Az PowerShell.
     
     Creates an eligible (not active) role assignment that the principal can
-    activate when needed via PIM.
+    activate when needed via PIM. Uses built-in Az.Resources only (no external modules).
     
     NOTE: PIM eligible roles can ONLY be assigned at Subscription or Resource Group level.
     Resource-level PIM assignments are NOT supported.
@@ -2338,10 +2394,9 @@ def assign_pim_eligible_role(
         principal_id: Object ID of the user, group, or service principal (required)
         role_name: Name of the role to assign (required)
                    e.g., 'Contributor', 'Storage Blob Data Contributor', 'Reader'
-        duration: ISO 8601 duration for the eligible assignment (default: P1Y = 1 year)
-                  Examples: P1Y (1 year), P6M (6 months), P30D (30 days)
-        tenant_id: Azure AD tenant ID (optional, uses current context if not provided)
-        subscription_id: Subscription ID (optional, uses current context if not provided)
+        duration: ISO 8601 duration for the eligible assignment (default: P365D = 1 year)
+                  Examples: P365D (1 year), P180D (6 months), P30D (30 days)
+        justification: Business justification for the PIM assignment
     
     Returns:
         Assignment result
@@ -2362,6 +2417,12 @@ Resource-level PIM assignments are NOT supported."""
 Provide the object ID of the user, group, or service principal to assign the role to.
 You can find this in Azure Portal > Entra ID > Users/Groups > select user > Object ID"""
     
+    # Auto-resolve: accept email, display name, group name, or Object ID
+    resolved_id, resolve_info = resolve_principal_id(principal_id)
+    if not resolved_id:
+        return f"Error resolving principal: {resolve_info}"
+    principal_id = resolved_id
+    
     if not role_name:
         return """STOP: 'role_name' is required.
 
@@ -2374,6 +2435,12 @@ Common Azure roles:
   - Key Vault Administrator
   - Key Vault Secrets User"""
     
+    if not justification:
+        return """STOP: 'justification' is required.
+
+Ask the user: "What is your business justification for this PIM assignment?"
+Do NOT proceed without a user-provided justification."""
+    
     script_path = get_script_path("assign-eligible-pim.ps1")
     if not os.path.exists(script_path):
         return "Error: assign-eligible-pim.ps1 not found"
@@ -2382,18 +2449,12 @@ Common Azure roles:
         "Scope": scope,
         "PrincipalID": principal_id,
         "RoleName": role_name,
-        "Duration": duration
+        "Duration": duration,
+        "Justification": justification
     }
     
-    if tenant_id:
-        params["TenantID"] = tenant_id
-    if subscription_id:
-        params["SubscriptionID"] = subscription_id
-    
     output_lines = []
-    output_lines.append("=" * 70)
     output_lines.append("ASSIGNING PIM ELIGIBLE ROLE")
-    output_lines.append("=" * 70)
     output_lines.append("")
     output_lines.append(f"  Role:         {role_name}")
     output_lines.append(f"  Principal ID: {principal_id}")
@@ -2410,11 +2471,107 @@ Common Azure roles:
         output_lines.append(f"Error: {str(e)}")
         output_lines.append("")
         output_lines.append("Common causes:")
-        output_lines.append("  - EasyPIM module auto-install failed (check network/permissions)")
         output_lines.append("  - Not authenticated: Run Connect-AzAccount")
-        output_lines.append("  - Insufficient permissions to assign PIM roles")
+        output_lines.append("  - Insufficient permissions (need User Access Administrator or Owner)")
         output_lines.append("  - Invalid principal ID or scope")
+        output_lines.append("  - Role name not found")
         return "\n".join(output_lines)
+
+
+def deactivate_pim_roles(
+    deactivate_all: bool = False,
+    subscription_name: str = None,
+    resource_group_name: str = None,
+    role_name: str = None
+) -> str:
+    """
+    Deactivates active PIM roles for the current user.
+    
+    Args:
+        deactivate_all: If True, deactivates ALL active PIM roles
+        subscription_name: Subscription name (for specific role mode)
+        resource_group_name: Resource group name (optional)
+        role_name: Role name to deactivate (for specific role mode)
+    """
+    if not deactivate_all:
+        missing = []
+        if not role_name:
+            missing.append("role_name (e.g., 'Contributor', 'Azure AI User')")
+        if not subscription_name:
+            missing.append("subscription_name (e.g., 'MCAPSDE_DEV')")
+        if missing:
+            return "Missing required parameters for specific role deactivation:\n" + "\n".join([f"  - {m}" for m in missing]) + "\n\nOr set deactivate_all=True to deactivate all active roles."
+    
+    script_path = get_script_path("deactivate-pim.ps1")
+    if not os.path.exists(script_path):
+        return "Error: deactivate-pim.ps1 not found"
+    
+    params = {}
+    if deactivate_all:
+        params["DeactivateAll"] = "$true"
+    else:
+        params["SubscriptionName"] = subscription_name
+        params["RoleName"] = role_name
+        if resource_group_name:
+            params["ResourceGroupName"] = resource_group_name
+    
+    return run_powershell_script(script_path, params)
+
+
+def remove_role(
+    mode: str,
+    scope: str,
+    object_ids: list = None,
+    role_names: list = None,
+    principal_id: str = None,
+    role_name: str = None,
+    justification: str = "Role removal"
+) -> str:
+    """
+    Removes Azure role assignments - RBAC or PIM eligible.
+    
+    Args:
+        mode: "rbac" for direct RBAC removal, "pim" for PIM eligible removal
+        scope: Azure resource scope
+        object_ids: List of Object IDs (RBAC mode)
+        role_names: List of role names (RBAC mode)
+        principal_id: Object ID of the principal (PIM mode)
+        role_name: Role name to remove (PIM mode)
+        justification: Business justification (PIM mode)
+    """
+    if mode not in ("rbac", "pim"):
+        return "Invalid mode. Must be 'rbac' or 'pim'."
+    
+    if not scope:
+        return "STOP: 'scope' is required."
+    
+    if mode == "rbac":
+        if not object_ids or not role_names:
+            return "RBAC mode requires object_ids and role_names."
+    else:
+        if not principal_id or not role_name:
+            return "PIM mode requires principal_id and role_name."
+        # Auto-resolve principal
+        resolved_id, resolve_info = resolve_principal_id(principal_id)
+        if not resolved_id:
+            return f"Error resolving principal: {resolve_info}"
+        principal_id = resolved_id
+    
+    script_path = get_script_path("remove-role.ps1")
+    if not os.path.exists(script_path):
+        return "Error: remove-role.ps1 not found"
+    
+    params = {"Mode": mode, "Scope": scope}
+    
+    if mode == "rbac":
+        params["ObjectIds"] = ",".join(object_ids)
+        params["RoleNames"] = ",".join(role_names)
+    else:
+        params["PrincipalId"] = principal_id
+        params["RoleName"] = role_name
+        params["Justification"] = justification
+    
+    return run_powershell_script(script_path, params)
 
 
 # ============================================================================
@@ -2477,9 +2634,7 @@ Optional:
         params["description"] = description
     
     output_lines = []
-    output_lines.append("=" * 70)
     output_lines.append("CREATING DATA COLLECTION ENDPOINT")
-    output_lines.append("=" * 70)
     output_lines.append("")
     output_lines.append(f"  DCE Name:              {dce_name}")
     output_lines.append(f"  Resource Group:        {resource_group}")
@@ -2594,9 +2749,7 @@ Optional:
         params["dceResourceGroup"] = dce_resource_group
     
     output_lines = []
-    output_lines.append("=" * 70)
     output_lines.append("CREATING DATA COLLECTION RULE")
-    output_lines.append("=" * 70)
     output_lines.append("")
     output_lines.append(f"  DCR Name:         {dcr_name}")
     output_lines.append(f"  Resource Group:   {resource_group}")
@@ -2676,9 +2829,7 @@ Optional:
         params["SubscriptionId"] = subscription_id
     
     output_lines = []
-    output_lines.append("=" * 70)
     output_lines.append("ATTACHING DCE TO DCR")
-    output_lines.append("=" * 70)
     output_lines.append("")
     output_lines.append(f"  DCR:  {dcr_name} (RG: {dcr_resource_group})")
     output_lines.append(f"  DCE:  {dce_name} (RG: {dce_resource_group or dcr_resource_group})")

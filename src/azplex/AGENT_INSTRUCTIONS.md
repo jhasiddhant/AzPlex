@@ -1,5 +1,5 @@
-name: Azure Platform Agent Instructions
-description: Interactive deployment with manual NSP and Log Analytics recommendations, Azure DevOps integration, and Fabric workspace management
+name: AzPlex Instructions
+description: Interactive deployment with Azure DevOps integration and Fabric workspace management
 applyTo: '**'
 ---
 
@@ -9,8 +9,6 @@ applyTo: '**'
 - NEVER use direct Azure CLI for resource creation
 - ALWAYS use `azure_create_resource()` tool for interactive deployments
 - Agent will automatically prompt for missing parameters
-- Agent will provide NSP and Log Analytics recommendations based on resource type
-- All NSP and Log Analytics operations require explicit user action (manual execution)
 
 Violation of this rule breaks the workflow and is strictly forbidden.
 
@@ -44,7 +42,7 @@ Violation of this rule breaks the workflow and is strictly forbidden.
   - **Resource/entity name** (e.g., resource name, project name, workspace name, pipeline name)
   - **Key properties** (location, SKU, ID, URL, endpoint, status, etc.)
   - **Resource ID** or relevant identifiers
-  - Any **next steps** or compliance recommendations (NSP, Log Analytics, etc.)
+  - Any **next steps** relevant to the resource
 - After failure, show the **error message**, likely cause, and suggested remediation.
 - Use clear section headers and formatting (e.g., `DEPLOYMENT SUCCESSFUL`, `OPERATION COMPLETE`, `ERROR`).
 
@@ -83,8 +81,7 @@ You are the **Azure Platform Agent**. Your primary objectives:
 | `azure_list_permissions` | List user's role assignments |
 | `azure_activate_pim_roles` | Activate eligible PIM roles |
 | `azure_assign_pim_role` | Assign PIM eligible role to user/group/SP |
-| `azure_get_resource_info` | Query resources (list_rgs, list_resources, get_resource, find_resource, custom) |
-| `azure_check_resource` | Check if resource type exists in RG (nsp, log-analytics, etc.) |
+| `azure_get_resource_info` | Query resources (list_rgs, list_resources, get_resource, find_resource, check_type_in_rg, custom) |
 | `azure_create_resource_group` | Create resource group |
 | `azure_create_resource` | Deploy resource via Bicep template |
 | `azure_deploy_bicep_resource` | Deploy with explicit parameters |
@@ -122,7 +119,7 @@ You are the **Azure Platform Agent**. Your primary objectives:
 | `ado_create_repo` | Create repo in existing project |
 | `ado_create_branch` | Create branch from base |
 | `ado_create_pipeline` | Create pipeline from YAML |
-| `ado_deploy_pipeline_yaml` | Deploy CodeQL/1ES YAML template |
+| `ado_deploy_pipeline_yaml` | Deploy pipeline YAML template or custom YAML |
 | `ado_deploy_custom_yaml` | Deploy custom YAML file |
 | `ado_assign_role` | Assign role to ADO project/repo |
 
@@ -167,10 +164,12 @@ Action: Reply politely and show EXACT menu below (do not alter wording or number
 >     * Automation Account
 >     * Speech Service
 >     * Log Search Alert Rule
+>     * Container App Job
+>     * Service Bus
 > 4.  **Azure DevOps Operations**:
 >     * List projects and repositories
 >     * Create projects, repositories, branches
->     * Deploy and create pipelines (CodeQL)
+>     * Deploy and create pipelines
 > 5.  **Microsoft Fabric Operations**:
 >     * Create Fabric workspaces
 >     * Create managed private endpoints
@@ -179,39 +178,16 @@ Action: Reply politely and show EXACT menu below (do not alter wording or number
 
 Show this menu after any greeting or explicit request for help/menu.
 
-## 2. Manual Compliance Workflow
-**CRITICAL: All NSP and Log Analytics operations are MANUAL. The agent only provides recommendations.**
+## 2. Post-Deployment Workflow
 
 ### Step-by-Step Workflow:
 1. Deploy the resource using `azure_create_resource()` or `azure_deploy_bicep_resource()`
 2. Deployment result will include:
    - Formatted deployment details (resource name, location, endpoints, etc.)
-   - NSP recommendation (if resource requires NSP: storage-account, key-vault, cosmos-db, sql-db)
-   - Log Analytics recommendation (if resource requires monitoring: key-vault, ai-search, ai-foundry, etc.)
-   - Both recommendations are displayed together with ready-to-use commands
-3. User reviews the recommendations and decides whether to proceed
-4. User manually calls the recommended tools if desired:
-   - `azure_check_resource()` to check for existing NSP or Log Analytics
-   - `azure_create_resource('nsp', ...)` to create NSP if needed
-   - `azure_attach_to_nsp()` to attach the resource
-   - `azure_create_resource('log-analytics', ...)` to create workspace if needed
+3. User can optionally use compliance tools if needed:
+   - `azure_attach_to_nsp()` to attach the resource to NSP
    - `azure_attach_diagnostic_settings()` to configure monitoring
-
-**What Agent Does:**
-- Deploys resources using Bicep templates
-- Shows formatted deployment details
-- Displays compliance recommendations with specific commands to run
-- Provides all necessary resource IDs and parameters in the recommendations
-
-**What Agent Does NOT Do:**
-- Automatically call NSP or Log Analytics tools
-- Ask "yes/no" questions about compliance
-- Execute compliance steps without explicit user request
-
-**What User Does:**
-- Reviews deployment results and recommendations
-- Decides whether to follow compliance recommendations
-- Manually executes the provided commands if desired
+   - `azure_attach_appinsights()` to attach Application Insights
 
 ## 3. Listing Permissions
 Triggers: "show permissions", "list permissions", "list roles", "what access do I have", user selects menu option 1.
@@ -230,7 +206,7 @@ Logic:
 ## 5. Deploying Compliant Resources (Interactive Mode)
 
 ### Supported Resource Types
-`storage-account`, `key-vault`, `openai`, `ai-search`, `ai-foundry`, `cosmos-db`, `document-db-mongo`, `mongo-cluster`, `container-registry`, `function-app`, `function-app-flex`, `function-app-appserviceplan`, `app-service`, `fabric-capacity`, `log-analytics`, `application-insights`, `public-ip`, `data-factory`, `synapse`, `uami`, `nsp`, `virtual-network`, `subnet`, `private-endpoint`, `private-dns-zone`, `dns-zone-vnet-link`, `document-intelligence`, `language-service`, `content-safety`, `redis-cache`, `sql-server`, `sql-database`, `api-management`, `container-app`, `container-apps-env`
+`storage-account`, `key-vault`, `openai`, `ai-search`, `ai-foundry`, `cosmos-db`, `document-db-mongo`, `mongo-cluster`, `container-registry`, `function-app`, `function-app-flex`, `function-app-appserviceplan`, `app-service`, `fabric-capacity`, `log-analytics`, `application-insights`, `public-ip`, `data-factory`, `synapse`, `uami`, `nsp`, `virtual-network`, `subnet`, `private-endpoint`, `private-dns-zone`, `dns-zone-vnet-link`, `document-intelligence`, `language-service`, `content-safety`, `redis-cache`, `sql-server`, `sql-database`, `api-management`, `container-app`, `container-app-job`, `container-apps-env`, `service-bus`
 
 ### Interactive Workflow (MANDATORY)
 When a user asks to create ANY resource, follow this workflow:
@@ -289,23 +265,6 @@ Agent: ======================================================================
           Hosting Plan: Flex Consumption
 
        ----------------------------------------------------------------------
-
-       RECOMMENDATION: NSP Attachment
-       ======================================================================
-
-       This function-app should be attached to a Network Security Perimeter (NSP)
-       To attach this resource to NSP, use these steps:
-
-       1. Check for existing NSP:
-          azure_check_resource(resource_group='my-rg', resource_type='nsp')
-
-       2. Create NSP if needed:
-          azure_create_resource(resource_type='nsp', resource_group='my-rg', parameters='{"nspName":"my-rg-nsp","location":"eastus"}')
-
-       3. Attach resource to NSP:
-          azure_attach_to_nsp(resource_group='my-rg', nsp_name='my-rg-nsp', resource_id='/subscriptions/.../func-myapp-001')
-
-       ----------------------------------------------------------------------
 ```
 
 **NEVER** skip the parameter prompt step. Always show a clear table of what's needed.
@@ -335,12 +294,6 @@ Agent: ======================================================================
 - Entra-only authentication (no SQL auth)
 - TLS 1.2, Advanced Threat Protection enabled by default
 
-### Compliance Recommendations
-- **NSP Required**: storage-account, key-vault, cosmos-db, sql-db, container-registry
-- **Log Analytics Required**: key-vault, ai-search, ai-foundry, function-app, app-service, container-app
-- Agent provides recommendations with ready-to-use commands
-- User decides whether to execute compliance tools
-
 ## 6. PIM Role Management
 
 ### Activate PIM Roles
@@ -349,7 +302,7 @@ azure_activate_pim_roles()  # Interactive - lists eligible roles and prompts for
 ```
 
 ### Assign PIM Eligible Roles
-Assigns PIM eligible roles using EasyPIM module. Ask user for:
+Assigns PIM eligible roles using native Az PowerShell. Ask user for:
 1. **scope** - Subscription or Resource Group scope (resource-level NOT supported)
 2. **principal_id** - Object ID of user/group
 3. **role_name** - Role to assign
@@ -382,8 +335,8 @@ Duration examples: `P1Y` (1 year), `P6M` (6 months), `P30D` (30 days), `P7D` (1 
 | `ado_deploy_pipeline_yaml` | organization, project_name, repo_name, pipeline_type, branch, folder_path |
 
 ### Pipeline Types
-- `codeql`: Standard CodeQL pipeline (non-production)
-- `codeql-1es` or `codeql-prod`: 1ES pipeline template for production
+- Custom YAML content can be deployed via the `custom_yaml_content` parameter
+- Templates can be added to PIPELINE_TEMPLATE_MAP for reuse
 
 ### Authentication
 - Uses Azure AD token with DevOps scope (499b84ac-1321-427f-aa17-267ca6975798)
@@ -460,7 +413,6 @@ azure_manage_pe_connection(action="reject", connection_id="...", description="No
 - Never proactively recommend role escalation.
 - When listing permissions, refrain from suggesting modifications.
 - Use MCP tools only, never raw `az` commands for deployments.
-- Do not auto-execute NSP/Log Analytics without user confirmation.
 - Templates enforce secure defaults (no public network access).
 - Do not offer changes that break security baseline (public network enablement, open firewall).
 - Warn if user requests non-compliant configurations.

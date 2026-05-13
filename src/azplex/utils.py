@@ -8,7 +8,7 @@ import re
 import shutil
 import json
 import platform
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional
 
 # ============================================================================
 # CONSTANTS - Error Detection
@@ -95,56 +95,6 @@ AZURE_ERROR_PATTERNS = {
 # CONFIGURATION CONSTANTS
 # ============================================================================
 
-# Resources that should be attached to NSP (suggestion will be provided after creation)
-NSP_MANDATORY_RESOURCES = [
-    "storage-account",
-    "key-vault",
-    "cosmos-db",
-    "sql-server"
-]
-
-# Resources that should have diagnostic settings (suggestion will be provided after creation)
-LOG_ANALYTICS_MANDATORY_RESOURCES = [
-    "logic-app",
-    "function-app",
-    "app-service",
-    "key-vault",
-    "kv",
-    "openai",
-    "azure-openai",
-    "synapse",
-    "azure-synapse-analytics",
-    "data-factory",
-    "azure-data-factory",
-    "adf",
-    "ai-hub",
-    "ai-project",
-    "ai-foundry",
-    "ai-services",
-    "ai-search",
-    "document-intelligence",
-    "ai-docintelligence",
-    "ai-contentsafety",
-    "ai-languageservices",
-    "front-door",
-    "frontdoor",
-    "afd",
-    "virtual-machine",
-    "vm",
-    "redis-cache",
-    "redis-enterprise",
-    "container-registry",
-    "acr",
-    "sql-database",
-    "sql-db",
-    "azure-sql-database",
-    "automation-account",
-    "automation",
-    "speech-service",
-    "speech",
-    "speech-services"
-]
-
 # Bicep Templates mapping
 TEMPLATE_MAP = {
     "storage-account": "templates/storage-account.bicep",
@@ -204,6 +154,9 @@ TEMPLATE_MAP = {
     "container-app": "templates/container-app.bicep",
     "containerapp": "templates/container-app.bicep",
     "aca": "templates/container-app.bicep",
+    "container-app-job": "templates/container-app-job.bicep",
+    "containerapp-job": "templates/container-app-job.bicep",
+    "aca-job": "templates/container-app-job.bicep",
     "data-collection-endpoint": "templates/data-collection-endpoint.bicep",
     "dce": "templates/data-collection-endpoint.bicep",
     "data-collection-rule": "templates/data-collection-rule.bicep",
@@ -245,6 +198,8 @@ TEMPLATE_MAP = {
     "mongo-cluster": "templates/document-db-mongo.bicep",
     "mongodb-cluster": "templates/document-db-mongo.bicep",
     "docdb-mongo": "templates/document-db-mongo.bicep",
+    "service-bus": "templates/service-bus.bicep",
+    "servicebus": "templates/service-bus.bicep",
 }
 
 # Resource types that have multiple variants - user should choose
@@ -407,21 +362,18 @@ RESOURCE_TYPE_PROVIDER_MAP = {
     "log-search-alert": "Microsoft.Insights/scheduledQueryRules",
     "alert-rule": "Microsoft.Insights/scheduledQueryRules",
     "scheduled-query-rule": "Microsoft.Insights/scheduledQueryRules",
+    "container-app-job": "Microsoft.App/jobs",
+    "containerapp-job": "Microsoft.App/jobs",
+    "aca-job": "Microsoft.App/jobs",
+    "service-bus": "Microsoft.ServiceBus/namespaces",
+    "servicebus": "Microsoft.ServiceBus/namespaces",
 }
 
 # Pipeline YAML Templates
-PIPELINE_TEMPLATE_MAP = {
-    "codeql": "templates/CodeQL_Pipeline.yml",
-    "codeql-1es": "templates/CodeQL_1ES_Pipeline.yml",
-}
+PIPELINE_TEMPLATE_MAP = {}
 
 # Pipeline type keywords for auto-detection
-PIPELINE_TYPE_KEYWORDS = {
-    "1es": "codeql-1es",
-    "prod": "codeql-1es",
-    "production": "codeql-1es",
-    "codeql": "codeql",
-}
+PIPELINE_TYPE_KEYWORDS = {}
 
 # Operational Scripts
 OP_SCRIPTS = {
@@ -455,6 +407,61 @@ def _detect_azure_error(output: str) -> Optional[str]:
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
     return None
+
+
+def resolve_principal_id(identifier: str) -> tuple:
+    """
+    Resolves a user email/UPN, group name, SPN name, or Object ID to an Object ID.
+    
+    Logic:
+    - If identifier is a valid GUID, returns it as-is with type 'unknown'
+    - If identifier contains '@', treats as user email/UPN
+    - Otherwise, tries user display name → group name → service principal name
+    
+    Args:
+        identifier: User email, display name, group name, SPN/MI name, or Object ID (GUID)
+    
+    Returns:
+        Tuple of (object_id, principal_type) where principal_type is 'User', 'Group', 'ServicePrincipal', or 'unknown'
+        Returns (None, error_message) if resolution fails
+    """
+    if not identifier or not identifier.strip():
+        return (None, "Empty identifier provided")
+    
+    identifier = identifier.strip()
+    
+    # Check if it's already a GUID
+    guid_pattern = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$', re.IGNORECASE)
+    if guid_pattern.match(identifier):
+        return (identifier, "unknown")
+    
+    # Try as user email/UPN
+    if '@' in identifier:
+        result = run_command(["az", "ad", "user", "show", "--id", identifier, "--query", "id", "-o", "tsv"])
+        obj_id = result.strip().split('\n')[0].strip()
+        if obj_id and guid_pattern.match(obj_id):
+            return (obj_id, "User")
+        return (None, f"Could not resolve user '{identifier}'. Verify the email/UPN is correct.")
+    
+    # Try as user display name
+    result = run_command(["az", "ad", "user", "list", "--filter", f"displayName eq '{identifier}'", "--query", "[0].id", "-o", "tsv"])
+    obj_id = result.strip().split('\n')[0].strip()
+    if obj_id and guid_pattern.match(obj_id):
+        return (obj_id, "User")
+    
+    # Try as group name
+    result = run_command(["az", "ad", "group", "show", "--group", identifier, "--query", "id", "-o", "tsv"])
+    obj_id = result.strip().split('\n')[0].strip()
+    if obj_id and guid_pattern.match(obj_id):
+        return (obj_id, "Group")
+    
+    # Try as service principal / managed identity display name
+    result = run_command(["az", "ad", "sp", "list", "--filter", f"displayName eq '{identifier}'", "--query", "[0].id", "-o", "tsv"])
+    obj_id = result.strip().split('\n')[0].strip()
+    if obj_id and guid_pattern.match(obj_id):
+        return (obj_id, "ServicePrincipal")
+    
+    return (None, f"Could not resolve '{identifier}' as a user, group, or service principal. Provide a valid email, display name, group name, SPN/MI name, or Object ID (GUID).")
 
 
 def run_command(command: list[str]) -> str:
@@ -550,13 +557,13 @@ def detect_pipeline_type(pipeline_name: str, user_input: str = "") -> str:
         if template_key in normalized_name or normalized_name in template_key:
             return template_key
     
-    return "codeql"
+    return pipeline_name.lower().replace('_', '-').replace(' ', '-')
 
 
 def get_pipeline_template(pipeline_type: str) -> Optional[str]:
     """
     Gets the pipeline template path for a given pipeline type.
-    Falls back to codeql if requested type doesn't exist.
+    Returns None if requested type doesn't exist.
     """
     if pipeline_type in PIPELINE_TEMPLATE_MAP:
         template_rel = PIPELINE_TEMPLATE_MAP[pipeline_type]
@@ -567,12 +574,6 @@ def get_pipeline_template(pipeline_type: str) -> Optional[str]:
     normalized_type = pipeline_type.lower().replace('_', '-').replace(' ', '-')
     if normalized_type in PIPELINE_TEMPLATE_MAP:
         template_rel = PIPELINE_TEMPLATE_MAP[normalized_type]
-        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_rel)
-        if os.path.exists(template_path):
-            return template_path
-    
-    if "codeql" in PIPELINE_TEMPLATE_MAP:
-        template_rel = PIPELINE_TEMPLATE_MAP["codeql"]
         template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_rel)
         if os.path.exists(template_path):
             return template_path
@@ -755,9 +756,7 @@ def get_resource_id(resource_group: str, resource_type: str, parameters: Dict[st
 def format_deployment_details(resource_type: str, resource_group: str, parameters: Dict[str, str]) -> str:
     """Format deployment details in a user-friendly way based on resource type."""
     details = []
-    details.append("=" * 70)
     details.append("Deployment successful")
-    details.append("=" * 70)
     details.append("")
     details.append("Deployment Details:")
     details.append("")
@@ -917,14 +916,12 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
         details.append(f"   Storage (ADLS):      {storage_name}")
         details.append(f"   Public Access:       Enabled")
         details.append("")
-        details.append("─" * 70)
         details.append("")
         details.append("DIAGNOSTIC SETTINGS - ACTION REQUIRED")
         details.append("")
         details.append("   Diagnostic settings are NOT configured by default.")
         details.append("   Configure via Portal or use: azure_attach_diagnostic_settings")
         details.append("")
-        details.append("─" * 70)
         details.append("")
         details.append("ROLE ASSIGNMENTS - REQUEST ADMIN")
         details.append("")
@@ -963,7 +960,6 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
         details.append(f"   Storage Account:     {storage_name}")
         details.append(f"   Public Access:       Enabled")
         details.append("")
-        details.append("─" * 70)
         details.append("")
         details.append("ROLE ASSIGNMENTS - REQUEST ADMIN")
         details.append("")
@@ -1005,7 +1001,6 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
         details.append(f"     - System Assigned MI: Enabled")
         details.append(f"     - User Assigned MI:   {uami_name}")
         details.append("")
-        details.append("─" * 70)
         details.append("")
         details.append("DIAGNOSTIC SETTINGS - RECOMMENDED")
         details.append("")
@@ -1119,12 +1114,9 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
         details.append(f"     - NSG: {nsg_name}")
         details.append("     - Public IPs: 3 (Primary, Secondary, Tertiary)")
         details.append("")
-        details.append("   " + "═" * 60)
         details.append("   IMPORTANT: VPN Gateway takes ~30-45 minutes to provision.")
-        details.append("   " + "═" * 60)
         details.append("")
         details.append("   Point-to-Site (P2S) Configuration")
-        details.append("   " + "─" * 60)
         details.append("   After the VPN Gateway is created, configure the P2S settings")
         details.append("   in the Azure Portal with the following details:")
         details.append("")
@@ -1175,7 +1167,6 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
         details.append(f"   Location: {location}")
     
     details.append("")
-    details.append("─" * 70)
     details.append("")
     
     return "\n".join(details)
@@ -1381,7 +1372,6 @@ def deploy_bicep(resource_group: str, resource_type: str, parameters: Dict[str, 
             output_lines.append("")
             output_lines.append("Running post-deployment tasks for Function App...")
             
-            function_app_name = parameters.get("functionAppName", "")
             storage_account_name = parameters.get("storageAccountName", "")
             uami_name = parameters.get("uamiName", "")
             
@@ -1424,53 +1414,6 @@ def deploy_bicep(resource_group: str, resource_type: str, parameters: Dict[str, 
         
         else:
             output = [format_deployment_details(resource_type, resource_group, parameters)]
-        
-        resource_id = get_resource_id(resource_group, resource_type, parameters)
-        
-        # NSP compliance prompt
-        if resource_type in NSP_MANDATORY_RESOURCES:
-            output.append("\n" + "─" * 70)
-            output.append("")
-            output.append("Compliance Requirement")
-            output.append("═" * 70)
-            output.append("")
-            output.append("This resource requires NSP attachment for:")
-            output.append("   - Secure PaaS Resources - Network Isolation")
-            output.append("")
-            output.append("═" * 70)
-            output.append("")
-            output.append("Do you want to attach this resource to NSP?")
-            output.append("")
-            output.append("   Type 'yes' or 'attach to NSP' to proceed")
-            output.append("   Type 'no' to skip (not recommended - resource will not be compliant)")
-            output.append("")
-            output.append("Automated workflow will:")
-            output.append("   1. Check if NSP exists in the resource group")
-            output.append("   2. Create NSP if it doesn't exist (skip if exists)")
-            output.append("   3. Attach the resource to the NSP")
-            output.append("")
-        
-        # Log Analytics compliance prompt
-        if resource_type in LOG_ANALYTICS_MANDATORY_RESOURCES:
-            output.append("\n" + "═" * 70)
-            output.append("Compliance Requirement")
-            output.append("═" * 70)
-            output.append("")
-            output.append("This resource requires Log Analytics diagnostic settings for:")
-            output.append("   Resource Monitoring & Compliance")
-            output.append("")
-            output.append("═" * 70)
-            output.append("")
-            output.append("Do you want to configure Log Analytics for this resource?")
-            output.append("")
-            output.append("   Type 'yes' or 'configure Log Analytics' to proceed")
-            output.append("   Type 'no' to skip (not recommended - resource will not have monitoring)")
-            output.append("")
-            output.append("Automated workflow will:")
-            output.append("   1. Check if Log Analytics Workspace exists in the resource group")
-            output.append("   2. Create workspace if it doesn't exist (skip if exists)")
-            output.append("   3. Configure diagnostic settings for the resource")
-            output.append("")
         
         return "\n".join(output)
     

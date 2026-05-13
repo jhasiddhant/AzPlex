@@ -30,22 +30,29 @@
   "contributes": {
     "mcpServers": {
       "azplex": {
-        "command": "azplex",
-        "args": [],
-        "env": {}
+        "command": "${extensionPath}/.venv/bin/python3",
+        "args": [
+          "-m",
+          "azplex.server"
+        ],
+        "env": {
+          "PYTHONPATH": "${extensionPath}/bundled"
+        }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile && npm run bundle-python",
     "compile": "tsc -p ./",
+    "bundle-python": "rm -rf bundled && mkdir -p bundled && cp -r ../src/azplex bundled/",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
     "publish": "vsce publish"
   },
   "devDependencies": {
+    "@types/node": "^20.19.39",
     "@types/vscode": "^1.96.0",
-    "typescript": "^5.4.0",
-    "@vscode/vsce": "^3.0.0"
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.4.0"
   }
 }

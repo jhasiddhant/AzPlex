@@ -5,12 +5,11 @@
 import os
 import json
 import shutil
-from typing import Optional
 
 try:
-    from .utils import run_powershell_script, run_command, get_script_path
+    from .utils import run_powershell_script, run_command, get_script_path, resolve_principal_id
 except ImportError:
-    from utils import run_powershell_script, run_command, get_script_path
+    from utils import run_powershell_script, run_command, get_script_path, resolve_principal_id
 
 
 def list_permissions(user_principal_name: str = None) -> str:
@@ -183,6 +182,12 @@ def assign_role(
     if principal_type not in valid_principal_types:
         return f"Invalid principal_type: '{principal_type}'. Must be one of: {', '.join(valid_principal_types)}"
     
+    # Auto-resolve: accept email, display name, group name, or Object ID
+    resolved_id, resolve_info = resolve_principal_id(principal_id)
+    if not resolved_id:
+        return f"Error resolving principal: {resolve_info}"
+    principal_id = resolved_id
+    
     script_path = get_script_path("assign-fabric-role.ps1")
     if not os.path.exists(script_path):
         return "Error: assign-fabric-role.ps1 not found"
@@ -203,6 +208,30 @@ def assign_role(
 # ============================================================================
 # DEPLOYMENT PIPELINE FUNCTIONS
 # ============================================================================
+
+def list_workspaces() -> str:
+    """Lists all Microsoft Fabric workspaces the current user has access to."""
+    script_content = """
+$tokenResponse = az account get-access-token --resource https://analysis.windows.net/powerbi/api | ConvertFrom-Json
+if (-not $tokenResponse -or -not $tokenResponse.accessToken) { Write-Error "AUTH_FAILED"; exit 1 }
+$headers = @{ "Authorization" = "Bearer $($tokenResponse.accessToken)"; "Content-Type" = "application/json" }
+$response = Invoke-RestMethod -Uri "https://api.fabric.microsoft.com/v1/workspaces" -Method Get -Headers $headers
+$workspaces = $response.value | Select-Object id, displayName, type, state, capacityId
+$workspaces | ConvertTo-Json -Depth 3
+"""
+    ps_executable = "pwsh" if shutil.which("pwsh") else "powershell"
+    result = run_command([ps_executable, "-ExecutionPolicy", "Bypass", "-Command", script_content])
+    result = result.strip()
+    if "AUTH_FAILED" in result or "ERROR" in result.upper():
+        return json.dumps({"error": "Failed to list Fabric workspaces", "details": result})
+    try:
+        workspaces = json.loads(result)
+        if not isinstance(workspaces, list):
+            workspaces = [workspaces]
+        return json.dumps({"count": len(workspaces), "workspaces": workspaces}, indent=2)
+    except json.JSONDecodeError:
+        return json.dumps({"error": "Failed to parse workspace list", "raw_output": result})
+
 
 def _resolve_workspace_id(workspace_name: str) -> tuple:
     """Resolve a Fabric workspace name to its ID using the Fabric API.
@@ -288,9 +317,7 @@ def _create_single_pipeline(
     output = [create_result]
     output.append("")
     output.append(f"Pipeline ID: {pipeline_id}")
-    output.append("=" * 50)
     output.append(f"Assigning workspaces to pipeline '{pipeline_name}' stages...")
-    output.append("=" * 50)
 
     # Resolve all workspace names to IDs
     ws_ids = []
@@ -336,12 +363,10 @@ def _create_single_pipeline(
             output.append(f"\nERROR assigning '{ws_name}' to {stage_names[i]}: {str(e)}")
 
     output.append("")
-    output.append("=" * 50)
     output.append("NEXT STEP: Assign roles to this pipeline using:")
     output.append(f"  Tool: fabric_add_deployment_pipeline_role")
     output.append(f"  Pipeline ID: {pipeline_id}")
     output.append(f"  Required: user_email, role (default: Admin)")
-    output.append("=" * 50)
 
     return "\n".join(output)
 
@@ -419,9 +444,7 @@ Please specify which deployment pipeline type you want to create."""
         output = []
 
         # Pipeline 1: Dev -> UAT
-        output.append("=" * 60)
         output.append(f"PIPELINE 1: {pipeline_name}-Dev-to-UAT")
-        output.append("=" * 60)
         result1 = _create_single_pipeline(
             pipeline_name=f"{pipeline_name}-Dev-to-UAT",
             stage_names=["Development", "UAT"],
@@ -433,9 +456,7 @@ Please specify which deployment pipeline type you want to create."""
         output.append("")
 
         # Pipeline 2: UAT -> Prod
-        output.append("=" * 60)
         output.append(f"PIPELINE 2: {pipeline_name}-UAT-to-Prod")
-        output.append("=" * 60)
         result2 = _create_single_pipeline(
             pipeline_name=f"{pipeline_name}-UAT-to-Prod",
             stage_names=["UAT", "Production"],
@@ -480,12 +501,11 @@ def add_deployment_pipeline_role(
     if principal_type not in valid_principal_types:
         return f"Invalid principal_type: '{principal_type}'. Must be one of: {', '.join(valid_principal_types)}"
     
-    # Resolve user email to Object ID
-    resolve_cmd = ["az", "ad", "user", "show", "--id", user_email, "--query", "id", "-o", "tsv"]
-    principal_id = run_command(resolve_cmd).strip()
-    
-    if not principal_id or "ERROR" in principal_id.upper():
-        return f"Failed to resolve user email '{user_email}' to Object ID.\n\nResult: {principal_id}\n\nCommon causes:\n- User does not exist in Entra ID\n- Not authenticated: Run 'az login'\n- Email address is incorrect"
+    # Auto-resolve: accept email, display name, group name, or Object ID
+    resolved_id, resolve_info = resolve_principal_id(user_email)
+    if not resolved_id:
+        return f"Error resolving principal '{user_email}': {resolve_info}"
+    principal_id = resolved_id
     
     script_path = get_script_path("add-deployment-pipeline-role.ps1")
     if not os.path.exists(script_path):

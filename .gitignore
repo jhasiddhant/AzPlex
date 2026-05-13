@@ -73,6 +73,7 @@ coverage.xml
 # VS Code extension
 extension/node_modules/
 extension/out/
+extension/bundled/
 *.vsix
 
 # PyPI credentials (if accidentally created)
