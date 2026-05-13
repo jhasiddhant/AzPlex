@@ -3,18 +3,18 @@
 # ============================================================================
 
 import os
-import json
-from typing import Optional
 
 try:
     from .utils import (
         run_powershell_script, get_script_path,
-        detect_pipeline_type, PIPELINE_TEMPLATE_MAP
+        detect_pipeline_type, PIPELINE_TEMPLATE_MAP,
+        resolve_principal_id
     )
 except ImportError:
     from utils import (
         run_powershell_script, get_script_path,
-        detect_pipeline_type, PIPELINE_TEMPLATE_MAP
+        detect_pipeline_type, PIPELINE_TEMPLATE_MAP,
+        resolve_principal_id
     )
 
 
@@ -285,7 +285,7 @@ def deploy_pipeline_yaml(organization: str = None, project_name: str = None,
     if not repo_name or not repo_name.strip():
         missing.append("repo_name (existing repo)")
     if not pipeline_type or not pipeline_type.strip():
-        missing.append("pipeline_type (template key like 'codeql', 'codeql-1es', or name for custom)")
+        missing.append("pipeline_type (template key from PIPELINE_TEMPLATE_MAP, or name for custom)")
     if not branch or not branch.strip():
         missing.append("branch (target branch, usually 'main')")
     if missing:
@@ -358,7 +358,7 @@ def create_pipeline(organization: str = None, project_name: str = None,
     if pipeline_name and not pipeline_type:
         pipeline_type = detect_pipeline_type(pipeline_name, "")
     elif not pipeline_type:
-        pipeline_type = "codeql"
+        pipeline_type = pipeline_name.lower().replace('_', '-').replace(' ', '-') if pipeline_name else ""
 
     missing = []
     if not organization or not organization.strip():
@@ -471,6 +471,12 @@ def assign_role(
     # Normalize organization URL
     if organization and not organization.strip().lower().startswith("http"):
         organization = f"https://dev.azure.com/{organization.strip()}"
+    
+    # Auto-resolve: accept email, display name, group name, or Object ID
+    resolved_id, resolve_info = resolve_principal_id(principal_id)
+    if not resolved_id:
+        return f"Error resolving principal: {resolve_info}"
+    principal_id = resolved_id
     
     script_path = get_script_path("assign-ado-role.ps1")
     if not os.path.exists(script_path):

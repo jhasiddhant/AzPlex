@@ -1,0 +1,222 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 700" font-family="Segoe UI, -apple-system, sans-serif">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/>
+    </filter>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8faff"/>
+      <stop offset="100%" stop-color="#eef2f9"/>
+    </linearGradient>
+    <linearGradient id="userGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="vscodeGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0098ff"/>
+      <stop offset="100%" stop-color="#0078d4"/>
+    </linearGradient>
+    <linearGradient id="mcpGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="moduleGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="infraGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="cloudGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6" fill="#0078d4"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="700" fill="url(#bgGrad)" rx="12"/>
+
+  <!-- Title -->
+  <text x="550" y="38" text-anchor="middle" font-size="22" font-weight="700" fill="#1e293b">AzPlex Architecture</text>
+  <text x="550" y="58" text-anchor="middle" font-size="12" fill="#64748b">MCP Server for Azure, Azure DevOps &amp; Microsoft Fabric</text>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- COLUMN 1: User -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="280" width="120" height="100" rx="14" fill="url(#userGrad)"/>
+    <!-- User icon -->
+    <circle cx="90" cy="315" r="14" fill="none" stroke="white" stroke-width="2"/>
+    <path d="M68,355 Q68,338 90,338 Q112,338 112,355" fill="none" stroke="white" stroke-width="2"/>
+    <text x="90" y="374" text-anchor="middle" font-size="12" font-weight="600" fill="white">User</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- COLUMN 2: VS Code + Extension -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="200" y="220" width="160" height="220" rx="14" fill="white" stroke="#0078d4" stroke-width="2"/>
+    <rect x="200" y="220" width="160" height="38" rx="14" fill="url(#vscodeGrad)"/>
+    <rect x="200" y="244" width="160" height="14" fill="url(#vscodeGrad)"/>
+    <text x="280" y="245" text-anchor="middle" font-size="13" font-weight="700" fill="white">VS Code</text>
+
+    <!-- Copilot Chat -->
+    <rect x="215" y="272" width="130" height="32" rx="6" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1"/>
+    <text x="280" y="293" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">GitHub Copilot Chat</text>
+
+    <!-- Extension -->
+    <rect x="215" y="316" width="130" height="32" rx="6" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1"/>
+    <text x="280" y="337" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">AzPlex Extension</text>
+
+    <!-- Auto-config -->
+    <text x="280" y="368" text-anchor="middle" font-size="9" fill="#64748b">Auto-creates .venv</text>
+    <text x="280" y="380" text-anchor="middle" font-size="9" fill="#64748b">Installs MCP package</text>
+    <text x="280" y="392" text-anchor="middle" font-size="9" fill="#64748b">Registers MCP server</text>
+
+    <!-- MCP badge -->
+    <rect x="232" y="405" width="96" height="22" rx="11" fill="#e0f2fe"/>
+    <text x="280" y="420" text-anchor="middle" font-size="9" font-weight="600" fill="#0284c7">stdio transport</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- COLUMN 3: MCP Server Core -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <g filter="url(#shadow)">
+    <rect x="420" y="100" width="260" height="520" rx="14" fill="white" stroke="#059669" stroke-width="2"/>
+    <rect x="420" y="100" width="260" height="38" rx="14" fill="url(#mcpGrad)"/>
+    <rect x="420" y="124" width="260" height="14" fill="url(#mcpGrad)"/>
+    <text x="550" y="125" text-anchor="middle" font-size="13" font-weight="700" fill="white">MCP Server (FastMCP)</text>
+
+    <!-- server.py -->
+    <rect x="440" y="152" width="220" height="36" rx="8" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1"/>
+    <text x="550" y="175" text-anchor="middle" font-size="11" font-weight="600" fill="#047857">server.py — Tool Definitions</text>
+
+    <!-- Divider -->
+    <line x1="440" y1="202" x2="660" y2="202" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="550" y="218" text-anchor="middle" font-size="9" font-weight="600" fill="#94a3b8" letter-spacing="2">BUSINESS LOGIC</text>
+
+    <!-- azure.py -->
+    <rect x="440" y="230" width="220" height="50" rx="8" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+    <text x="550" y="252" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">azure.py</text>
+    <text x="550" y="270" text-anchor="middle" font-size="9" fill="#a16207">RBAC · PIM · Deploy · PE · VNet · DCE/DCR</text>
+
+    <!-- ado.py -->
+    <rect x="440" y="290" width="220" height="50" rx="8" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+    <text x="550" y="312" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">ado.py</text>
+    <text x="550" y="330" text-anchor="middle" font-size="9" fill="#a16207">Projects · Repos · Pipelines · Branches</text>
+
+    <!-- fabric.py -->
+    <rect x="440" y="350" width="220" height="50" rx="8" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+    <text x="550" y="372" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">fabric.py</text>
+    <text x="550" y="390" text-anchor="middle" font-size="9" fill="#a16207">Workspaces · Git · Deploy Pipelines · PE</text>
+
+    <!-- general.py -->
+    <rect x="440" y="410" width="220" height="36" rx="8" fill="#fef3c7" stroke="#fbbf24" stroke-width="1"/>
+    <text x="550" y="433" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">general.py — Identity &amp; Auth</text>
+
+    <!-- Divider -->
+    <line x1="440" y1="462" x2="660" y2="462" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="550" y="478" text-anchor="middle" font-size="9" font-weight="600" fill="#94a3b8" letter-spacing="2">INFRASTRUCTURE</text>
+
+    <!-- utils.py -->
+    <rect x="440" y="490" width="220" height="50" rx="8" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1"/>
+    <text x="550" y="512" text-anchor="middle" font-size="12" font-weight="700" fill="#5b21b6">utils.py</text>
+    <text x="550" y="530" text-anchor="middle" font-size="9" fill="#7c3aed">Helpers · Constants · Bicep Engine</text>
+
+    <!-- scripts/ -->
+    <rect x="440" y="550" width="104" height="50" rx="8" fill="#fae8ff" stroke="#d946ef" stroke-width="1"/>
+    <text x="492" y="572" text-anchor="middle" font-size="10" font-weight="700" fill="#86198f">scripts/</text>
+    <text x="492" y="588" text-anchor="middle" font-size="9" fill="#a21caf">PowerShell</text>
+
+    <!-- templates/ -->
+    <rect x="556" y="550" width="104" height="50" rx="8" fill="#fae8ff" stroke="#d946ef" stroke-width="1"/>
+    <text x="608" y="572" text-anchor="middle" font-size="10" font-weight="700" fill="#86198f">templates/</text>
+    <text x="608" y="588" text-anchor="middle" font-size="9" fill="#a21caf">Bicep</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- COLUMN 4: Cloud Services -->
+  <!-- ═══════════════════════════════════════════════ -->
+
+  <!-- Azure -->
+  <g filter="url(#shadow)">
+    <rect x="760" y="120" width="290" height="140" rx="14" fill="white" stroke="#0284c7" stroke-width="2"/>
+    <rect x="760" y="120" width="290" height="38" rx="14" fill="url(#cloudGrad)"/>
+    <rect x="760" y="144" width="290" height="14" fill="url(#cloudGrad)"/>
+    <text x="905" y="145" text-anchor="middle" font-size="13" font-weight="700" fill="white">Azure</text>
+    <text x="905" y="180" text-anchor="middle" font-size="10" fill="#475569">Resource Groups · Storage · Key Vault</text>
+    <text x="905" y="196" text-anchor="middle" font-size="10" fill="#475569">OpenAI · Cosmos DB · VNets · NSGs</text>
+    <text x="905" y="212" text-anchor="middle" font-size="10" fill="#475569">Private Endpoints · PIM · RBAC</text>
+    <text x="905" y="228" text-anchor="middle" font-size="10" fill="#475569">Resource deployment via Bicep</text>
+    <!-- Azure CLI badge -->
+    <rect x="830" y="237" width="150" height="18" rx="9" fill="#e0f2fe"/>
+    <text x="905" y="250" text-anchor="middle" font-size="9" font-weight="600" fill="#0284c7">via Azure CLI (az) + REST</text>
+  </g>
+
+  <!-- Azure DevOps -->
+  <g filter="url(#shadow)">
+    <rect x="760" y="290" width="290" height="120" rx="14" fill="white" stroke="#0284c7" stroke-width="2"/>
+    <rect x="760" y="290" width="290" height="38" rx="14" fill="url(#cloudGrad)"/>
+    <rect x="760" y="314" width="290" height="14" fill="url(#cloudGrad)"/>
+    <text x="905" y="315" text-anchor="middle" font-size="13" font-weight="700" fill="white">Azure DevOps</text>
+    <text x="905" y="350" text-anchor="middle" font-size="10" fill="#475569">Projects · Repos · Branches</text>
+    <text x="905" y="366" text-anchor="middle" font-size="10" fill="#475569">Pipelines · YAML Deploy · Roles</text>
+    <rect x="830" y="380" width="150" height="18" rx="9" fill="#e0f2fe"/>
+    <text x="905" y="393" text-anchor="middle" font-size="9" font-weight="600" fill="#0284c7">via Azure CLI (az devops)</text>
+  </g>
+
+  <!-- Microsoft Fabric -->
+  <g filter="url(#shadow)">
+    <rect x="760" y="440" width="290" height="120" rx="14" fill="white" stroke="#0284c7" stroke-width="2"/>
+    <rect x="760" y="440" width="290" height="38" rx="14" fill="url(#cloudGrad)"/>
+    <rect x="760" y="464" width="290" height="14" fill="url(#cloudGrad)"/>
+    <text x="905" y="465" text-anchor="middle" font-size="13" font-weight="700" fill="white">Microsoft Fabric</text>
+    <text x="905" y="500" text-anchor="middle" font-size="10" fill="#475569">Workspaces · Git Integration</text>
+    <text x="905" y="516" text-anchor="middle" font-size="10" fill="#475569">Deployment Pipelines · Private Endpoints</text>
+    <rect x="830" y="530" width="150" height="18" rx="9" fill="#e0f2fe"/>
+    <text x="905" y="543" text-anchor="middle" font-size="9" font-weight="600" fill="#0284c7">via Fabric REST API</text>
+  </g>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- ARROWS -->
+  <!-- ═══════════════════════════════════════════════ -->
+
+  <!-- User → VS Code -->
+  <line x1="150" y1="330" x2="196" y2="330" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="173" y="322" text-anchor="middle" font-size="8" fill="#64748b">NL</text>
+  <text x="173" y="342" text-anchor="middle" font-size="8" fill="#64748b">Prompts</text>
+
+  <!-- VS Code → MCP Server -->
+  <line x1="360" y1="330" x2="416" y2="330" stroke="#0078d4" stroke-width="2" marker-end="url(#arrowBlue)" stroke-dasharray="6,3"/>
+  <text x="388" y="322" text-anchor="middle" font-size="8" fill="#0078d4">MCP</text>
+  <text x="388" y="342" text-anchor="middle" font-size="8" fill="#0078d4">stdio</text>
+
+  <!-- MCP → Azure -->
+  <line x1="680" y1="255" x2="756" y2="210" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- MCP → ADO -->
+  <line x1="680" y1="315" x2="756" y2="340" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- MCP → Fabric -->
+  <line x1="680" y1="375" x2="756" y2="490" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- PowerShell label -->
+  <text x="720" y="244" text-anchor="middle" font-size="8" fill="#64748b">pwsh</text>
+  <text x="720" y="330" text-anchor="middle" font-size="8" fill="#64748b">pwsh</text>
+  <text x="720" y="440" text-anchor="middle" font-size="8" fill="#64748b">pwsh</text>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- Legend -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <g transform="translate(30, 640)">
+    <rect width="1040" height="40" rx="8" fill="white" fill-opacity="0.7"/>
+    <text x="20" y="25" font-size="10" font-weight="600" fill="#475569">Flow:</text>
+    <text x="58" y="25" font-size="10" fill="#64748b">Natural language prompt → Copilot selects MCP tool → server.py dispatches → module runs PowerShell script → Azure CLI / REST API executes</text>
+  </g>
+</svg>

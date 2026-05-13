@@ -24,9 +24,7 @@ param disablePublicNetworkAccess bool = true
 param restrictOutboundNetworkAccess bool = true
 
 @description('Allowed FQDNs for outbound when restriction is enabled.')
-param allowedFqdnList array = [
-  'microsoft.com'
-]
+param allowedFqdnList array = []
 
 // Azure Document Intelligence account
 resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
