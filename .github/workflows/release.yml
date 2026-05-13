@@ -43,7 +43,9 @@ jobs:
           python-version: '3.12'
 
       - name: Build package
-        run: pip install build && cd pip && python -m build
+        run: |
+          cp -r src/azplex pip/src/azplex
+          pip install build && cd pip && python -m build
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
