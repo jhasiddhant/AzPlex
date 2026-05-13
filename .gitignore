@@ -71,10 +71,7 @@ __pypackages__/
 coverage.xml
 
 # VS Code extension
-extension/node_modules/
-extension/out/
-extension/bundled/
-*.vsix
+extension/
 
 # PyPI credentials (if accidentally created)
 .pypirc
