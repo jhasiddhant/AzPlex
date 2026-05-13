@@ -37,26 +37,41 @@ Then add to your MCP config (`.vscode/mcp.json`):
 
 ## What It Does
 
-**40 MCP tools** across Azure, Azure DevOps, and Microsoft Fabric — plus **50 Bicep resource types** for infrastructure deployment.
+**29 MCP tools** across Azure, Azure DevOps, and Microsoft Fabric — plus **50 Bicep resource types** for infrastructure deployment.
 
-### Azure (24 tools)
+### Azure (15 tools)
 
 | Category | Tools |
 |----------|-------|
-| **Auth & Account** | Login, list/set subscriptions, get current user, show agent instructions |
-| **Resource Management** | Create resource groups, deploy 50 resource types via Bicep templates, query resources (Resource Graph & CLI), check existence, update tags, activity logs |
-| **Security & Identity** | List RBAC roles (active/eligible), activate PIM roles (all or specific), assign PIM eligible roles, assign RBAC to SPNs/MIs |
-| **Networking** | Private endpoints with auto DNS, manage PE connections (list/approve/reject), VNet integration & network ACL rules, NSP attachment |
-| **Monitoring** | Diagnostic settings, App Insights attachment, data collection endpoints, data collection rules, DCE-to-DCR attachment |
-| **Container Apps** | Create Container Apps Environment (VNet, zone-redundant, workload profiles), create Container Apps (auto-detect/create environment) |
+| **Auth & Account** | `azure_login`, `azure_list_subscriptions`, `azure_set_subscription`, `get_current_user`, `show_agent_instructions` |
+| **Resource Info** | `azure_get_resource_info` — unified query tool (list resources/RGs, find resources, get identity, activity logs, Resource Graph KQL, raw CLI) |
+| **Resource Management** | `azure_create_resource_group`, `azure_create_resource` (50 Bicep templates), `azure_modify_resource` (tags, start/stop/restart, scale, public access, local auth, VNet integration, attach NSP/diagnostics/AppInsights/DCE) |
+| **Security & Identity** | `azure_list_roles` (active/eligible), `azure_assign_role` (RBAC or PIM), `azure_activate_pim_roles`, `azure_deactivate_pim_roles`, `azure_remove_role` (RBAC or PIM) |
+| **Networking** | `azure_manage_pe_connection` (list/approve/reject PE connections) |
 
-### Azure DevOps (9 tools)
+### Azure DevOps (7 tools)
 
-Create and manage projects, repositories, branches, pipelines, deploy YAML templates or custom YAML, and assign roles.
+| Tool | Purpose |
+|------|---------|
+| `ado_create_project` | Create project with initial repo |
+| `ado_create_repo` | Create additional repositories |
+| `ado_list` | List projects or repositories |
+| `ado_create_branch` | Create branches from base branch |
+| `ado_deploy_pipeline_yaml` | Deploy YAML templates or custom YAML to repos |
+| `ado_create_pipeline` | Create pipeline from YAML in repo |
+| `ado_assign_role` | Assign security group roles |
 
 ### Microsoft Fabric (7 tools)
 
-List workspaces/permissions, create workspaces, assign roles, Git integration, deployment pipelines (Dev/UAT/Prod), managed private endpoints.
+| Tool | Purpose |
+|------|---------|
+| `fabric_list` | List workspaces, permissions, or managed private endpoints |
+| `fabric_create_workspace` | Create workspace in a capacity |
+| `fabric_assign_role` | Assign workspace roles |
+| `fabric_attach_workspace_to_git` | Connect workspace to Azure DevOps Git |
+| `fabric_create_deployment_pipeline` | Create Dev→Prod or Dev→UAT→Prod pipelines |
+| `fabric_add_deployment_pipeline_role` | Add role to deployment pipeline |
+| `fabric_create_managed_private_endpoint` | Create managed PE for secure connectivity |
 
 ### Supported Bicep Resource Types (50)
 

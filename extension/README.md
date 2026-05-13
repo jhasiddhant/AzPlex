@@ -4,12 +4,12 @@ MCP server for **Azure**, **Azure DevOps**, and **Microsoft Fabric** — deploy,
 
 ## Features
 
-- **Azure Resource Management** — Deploy 40+ resource types via Bicep templates using natural language
-- **Azure Security & Identity** — RBAC assignments, PIM activation, auto-resolve email/name to Object ID
-- **Azure Networking** — Private endpoints with auto DNS, VNet integration, NSP attachment
-- **Azure Monitoring** — Diagnostic settings, Application Insights, DCE/DCR
+- **Azure Resource Info** — Unified query tool: list resources/RGs, find resources, get managed identity, activity logs, Resource Graph KQL, raw CLI
+- **Azure Resource Management** — Deploy 50 resource types via Bicep templates, modify resources (tags, start/stop/restart, scale, public access, local auth, VNet integration, attach NSP/diagnostics/AppInsights/DCE)
+- **Azure Security & Identity** — List/assign/remove RBAC roles, activate/deactivate PIM roles, assign PIM eligible roles
+- **Azure Networking** — Manage PE connections (list/approve/reject)
 - **Azure DevOps** — Create projects, repos, branches, pipelines, assign roles
-- **Microsoft Fabric** — Create workspaces, Git integration, deployment pipelines, managed private endpoints
+- **Microsoft Fabric** — List/create workspaces, Git integration, deployment pipelines, managed private endpoints
 
 ## Prerequisites
 

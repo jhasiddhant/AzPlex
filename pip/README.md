@@ -48,21 +48,23 @@ Or use `uvx`:
 
 ## Features
 
-### Azure (44 tools)
+### Azure (15 tools)
 
-- **Resource Management** — Deploy 40+ resource types via Bicep templates (Storage, Key Vault, OpenAI, Cosmos DB, Function Apps, Container Apps, SQL, Redis, VNet, Firewall, Front Door, and many more)
-- **Security & Identity** — RBAC role assignments, PIM activation/assignment, auto-resolve email/name to Object ID
-- **Networking** — Private endpoints with auto DNS, VNet integration, NSP attachment
-- **Monitoring** — Diagnostic settings, Application Insights, Data Collection Endpoints/Rules
+- **Auth & Account** — Login, list/set subscriptions, get current user
+- **Resource Info** — Unified query tool: list resources/RGs, find resources, get managed identity, activity logs, Resource Graph KQL, raw CLI
+- **Resource Management** — Create resource groups, deploy 50 resource types via Bicep, modify resources (tags, start/stop/restart, scale, public access, local auth, VNet integration, attach NSP/diagnostics/AppInsights/DCE)
+- **Security & Identity** — List RBAC roles (active/eligible), assign/remove roles (RBAC or PIM), activate/deactivate PIM roles
+- **Networking** — Manage PE connections (list/approve/reject)
 
-### Azure DevOps (9 tools)
+### Azure DevOps (7 tools)
 
 - List/create projects and repositories
 - Create branches, deploy YAML pipelines
 - Assign security group roles
 
-### Microsoft Fabric (8 tools)
+### Microsoft Fabric (7 tools)
 
+- List workspaces, permissions, and managed private endpoints
 - Create workspaces and assign roles
 - Git integration with Azure DevOps
 - Deployment pipelines (Dev→Prod, Dev→UAT→Prod)
