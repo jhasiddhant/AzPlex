@@ -35,7 +35,7 @@ Issues = "https://github.com/jhasiddhant/azplex/issues"
 azplex = "azplex.server:main"
 
 [tool.setuptools.packages.find]
-where = ["../src"]
+where = ["src"]
 
 [tool.setuptools.package-data]
 azplex = ["scripts/*.ps1", "templates/*.bicep", "templates/*.yml", "AGENT_INSTRUCTIONS.md"]
