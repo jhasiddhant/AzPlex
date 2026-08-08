@@ -61,6 +61,7 @@ htmlcov/
 .hypothesis/
 *.cover
 *.log
+tests/
 
 # Distribution
 *.whl
@@ -70,7 +71,7 @@ __pypackages__/
 .python-version
 coverage.xml
 
-# VS Code extension
+# VS Code extension build artifacts
 extension/
 
 # pip build artifacts
