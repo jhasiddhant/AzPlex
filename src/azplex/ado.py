@@ -2,7 +2,12 @@
 # ADO FUNCTIONS - Azure DevOps logic
 # ============================================================================
 
+import json
 import os
+import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
 
 try:
     from .utils import (
@@ -16,6 +21,325 @@ except ImportError:
         detect_pipeline_type, PIPELINE_TEMPLATE_MAP,
         resolve_principal_id
     )
+
+
+ADO_RESOURCE_ID = "499b84ac-1321-427f-aa17-267ca6975798"
+ADO_API_VERSION = "7.1"
+
+WORK_ITEM_FIELDS = {
+    "title": "System.Title",
+    "description": "System.Description",
+    "assigned_to": "System.AssignedTo",
+    "state": "System.State",
+    "iteration_path": "System.IterationPath",
+    "area_path": "System.AreaPath",
+    "priority": "Microsoft.VSTS.Common.Priority",
+    "story_points": "Microsoft.VSTS.Scheduling.StoryPoints",
+    "start_date": "Microsoft.VSTS.Scheduling.StartDate",
+    "target_date": "Microsoft.VSTS.Scheduling.TargetDate",
+    "tags": "System.Tags",
+}
+
+
+class AdoWorkItemError(Exception):
+    """Actionable Azure DevOps work-item operation failure."""
+
+    def __init__(self, message: str, code: str = "request_failed", status: int = None):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
+def _normalize_organization(organization: str) -> str:
+    value = (organization or "").strip().rstrip("/")
+    if not value:
+        raise AdoWorkItemError("organization is required", "validation_error")
+
+    if "://" not in value:
+        if not all(character.isalnum() or character in "-_." for character in value):
+            raise AdoWorkItemError("organization must be an Azure DevOps organization name or URL", "validation_error")
+        return f"https://dev.azure.com/{value}"
+
+    parsed = urllib.parse.urlparse(value)
+    hostname = (parsed.hostname or "").lower()
+    if hostname == "dev.azure.com":
+        organization_name = parsed.path.strip("/").split("/")[0]
+    elif hostname.endswith(".visualstudio.com"):
+        organization_name = hostname.removesuffix(".visualstudio.com")
+    else:
+        raise AdoWorkItemError("organization URL must use dev.azure.com or visualstudio.com", "validation_error")
+
+    if not organization_name:
+        raise AdoWorkItemError("organization URL must include the organization name", "validation_error")
+    return f"https://dev.azure.com/{urllib.parse.quote(organization_name, safe='')}"
+
+
+def _get_ado_token() -> str:
+    try:
+        result = subprocess.run(
+            [
+                "az", "account", "get-access-token",
+                "--resource", ADO_RESOURCE_ID,
+                "--query", "accessToken",
+                "--output", "tsv",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise AdoWorkItemError(
+            "Azure CLI was not found. Install Azure CLI and run 'az login'.",
+            "authentication_error",
+        ) from error
+    except subprocess.TimeoutExpired as error:
+        raise AdoWorkItemError(
+            "Timed out acquiring an Azure DevOps token. Run 'az login' and try again.",
+            "authentication_error",
+        ) from error
+
+    token = result.stdout.strip()
+    if result.returncode != 0 or not token:
+        detail = result.stderr.strip() or "Azure CLI returned no access token"
+        raise AdoWorkItemError(
+            f"Azure DevOps authentication failed. Run 'az login' and verify tenant access. {detail}",
+            "authentication_error",
+        )
+    return token
+
+
+def _ado_request(method: str, url: str, body=None, content_type: str = "application/json"):
+    payload = json.dumps(body).encode("utf-8") if body is not None else None
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {_get_ado_token()}",
+            "Accept": "application/json",
+            "Content-Type": content_type,
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response_body = response.read().decode("utf-8")
+            return json.loads(response_body) if response_body else {}
+    except urllib.error.HTTPError as error:
+        response_body = error.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(response_body).get("message", response_body)
+        except json.JSONDecodeError:
+            detail = response_body
+
+        if error.code == 401:
+            message = "Azure DevOps rejected the access token. Run 'az login' and verify the active tenant."
+            code = "authentication_error"
+        elif error.code == 403:
+            message = "Azure DevOps denied this operation. Verify project access and work-item permissions."
+            code = "permission_error"
+        elif error.code == 404:
+            message = "The Azure DevOps project or work item was not found."
+            code = "not_found"
+        else:
+            message = f"Azure DevOps API request failed with HTTP {error.code}."
+            code = "request_failed"
+        if detail:
+            message = f"{message} {detail}"
+        raise AdoWorkItemError(message, code, error.code) from error
+    except urllib.error.URLError as error:
+        raise AdoWorkItemError(
+            f"Could not reach Azure DevOps: {error.reason}",
+            "network_error",
+        ) from error
+
+
+def _normalize_work_item(item: dict) -> dict:
+    fields = item.get("fields", {})
+    normalized_fields = {
+        name: fields[field_name]
+        for name, field_name in WORK_ITEM_FIELDS.items()
+        if field_name in fields
+    }
+    normalized_fields["work_item_type"] = fields.get("System.WorkItemType")
+    normalized_fields["created_date"] = fields.get("System.CreatedDate")
+    normalized_fields["changed_date"] = fields.get("System.ChangedDate")
+    return {
+        "id": item.get("id"),
+        "revision": item.get("rev"),
+        "url": item.get("url"),
+        "fields": {key: value for key, value in normalized_fields.items() if value is not None},
+        "relations": item.get("relations", []),
+    }
+
+
+def _work_item_patch(
+    organization_url: str,
+    project_name: str,
+    title=None,
+    description=None,
+    assigned_to=None,
+    state=None,
+    iteration_path=None,
+    area_path=None,
+    priority=None,
+    story_points=None,
+    start_date=None,
+    target_date=None,
+    tags=None,
+    parent_id=None,
+) -> list:
+    values = {
+        "title": title,
+        "description": description,
+        "assigned_to": assigned_to,
+        "state": state,
+        "iteration_path": iteration_path,
+        "area_path": area_path,
+        "priority": priority,
+        "story_points": story_points,
+        "start_date": start_date,
+        "target_date": target_date,
+        "tags": "; ".join(tags) if isinstance(tags, list) else tags,
+    }
+    patch = [
+        {"op": "add", "path": f"/fields/{WORK_ITEM_FIELDS[name]}", "value": value}
+        for name, value in values.items()
+        if value is not None
+    ]
+    if parent_id is not None:
+        if not isinstance(parent_id, int) or parent_id <= 0:
+            raise AdoWorkItemError("parent_id must be a positive integer", "validation_error")
+        project = urllib.parse.quote(project_name, safe="")
+        patch.append({
+            "op": "add",
+            "path": "/relations/-",
+            "value": {
+                "rel": "System.LinkTypes.Hierarchy-Reverse",
+                "url": f"{organization_url}/{project}/_apis/wit/workItems/{parent_id}",
+            },
+        })
+    return patch
+
+
+def manage_work_item(
+    action: str,
+    organization: str,
+    project_name: str,
+    work_item_id: int = None,
+    work_item_type: str = None,
+    title: str = None,
+    description: str = None,
+    assigned_to: str = None,
+    state: str = None,
+    iteration_path: str = None,
+    area_path: str = None,
+    priority: int = None,
+    story_points: float = None,
+    start_date: str = None,
+    target_date: str = None,
+    tags: list = None,
+    parent_id: int = None,
+    comment: str = None,
+    wiql: str = None,
+    top: int = 50,
+) -> str:
+    """Creates, reads, updates, queries, or comments on an Azure DevOps work item."""
+    normalized_action = (action or "").strip().lower()
+    try:
+        if normalized_action not in {"create", "show", "update", "query", "comment"}:
+            raise AdoWorkItemError(
+                "action must be one of: create, show, update, query, comment",
+                "validation_error",
+            )
+        organization_url = _normalize_organization(organization)
+        if not project_name or not project_name.strip():
+            raise AdoWorkItemError("project_name is required", "validation_error")
+        project = urllib.parse.quote(project_name.strip(), safe="")
+        base_url = f"{organization_url}/{project}/_apis/wit"
+
+        if normalized_action == "create":
+            if not work_item_type or not work_item_type.strip():
+                raise AdoWorkItemError("work_item_type is required for create", "validation_error")
+            if not title or not title.strip():
+                raise AdoWorkItemError("title is required for create", "validation_error")
+            patch = _work_item_patch(
+                organization_url, project_name.strip(), title, description, assigned_to, state,
+                iteration_path, area_path, priority, story_points, start_date, target_date, tags, parent_id,
+            )
+            item_type = urllib.parse.quote(work_item_type.strip(), safe="")
+            data = _ado_request(
+                "POST",
+                f"{base_url}/workitems/${item_type}?api-version={ADO_API_VERSION}",
+                patch,
+                "application/json-patch+json",
+            )
+            result = _normalize_work_item(data)
+        elif normalized_action == "show":
+            if not isinstance(work_item_id, int) or work_item_id <= 0:
+                raise AdoWorkItemError("work_item_id must be a positive integer for show", "validation_error")
+            data = _ado_request(
+                "GET",
+                f"{base_url}/workitems/{work_item_id}?$expand=relations&api-version={ADO_API_VERSION}",
+            )
+            result = _normalize_work_item(data)
+        elif normalized_action == "update":
+            if not isinstance(work_item_id, int) or work_item_id <= 0:
+                raise AdoWorkItemError("work_item_id must be a positive integer for update", "validation_error")
+            patch = _work_item_patch(
+                organization_url, project_name.strip(), title, description, assigned_to, state,
+                iteration_path, area_path, priority, story_points, start_date, target_date, tags, parent_id,
+            )
+            if not patch:
+                raise AdoWorkItemError("update requires at least one field or parent_id", "validation_error")
+            data = _ado_request(
+                "PATCH",
+                f"{base_url}/workitems/{work_item_id}?api-version={ADO_API_VERSION}",
+                patch,
+                "application/json-patch+json",
+            )
+            result = _normalize_work_item(data)
+        elif normalized_action == "comment":
+            if not isinstance(work_item_id, int) or work_item_id <= 0:
+                raise AdoWorkItemError("work_item_id must be a positive integer for comment", "validation_error")
+            if not comment or not comment.strip():
+                raise AdoWorkItemError("comment is required for comment", "validation_error")
+            result = _ado_request(
+                "POST",
+                f"{base_url}/workitems/{work_item_id}/comments?api-version=7.1-preview.4",
+                {"text": comment.strip()},
+            )
+        else:
+            if not isinstance(top, int) or not 1 <= top <= 200:
+                raise AdoWorkItemError("top must be an integer from 1 to 200", "validation_error")
+            query = wiql.strip() if wiql and wiql.strip() else (
+                "SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo] "
+                "FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.ChangedDate] DESC"
+            )
+            response = _ado_request(
+                "POST",
+                f"{base_url}/wiql?$top={top}&api-version={ADO_API_VERSION}",
+                {"query": query},
+            )
+            result = {
+                "query_type": response.get("queryType"),
+                "columns": response.get("columns", []),
+                "work_items": response.get("workItems", []),
+                "work_item_relations": response.get("workItemRelations", []),
+            }
+
+        return json.dumps({"success": True, "action": normalized_action, "data": result}, indent=2)
+    except AdoWorkItemError as error:
+        return json.dumps({
+            "success": False,
+            "action": normalized_action or action,
+            "error": {
+                "code": error.code,
+                "message": str(error),
+                "status": error.status,
+            },
+        }, indent=2)
 
 
 # ============================================================================
