@@ -9,6 +9,8 @@
 #   - utils.py   : Shared helpers and constants
 # ============================================================================
 
+from typing import Literal
+
 from mcp.server.fastmcp import FastMCP
 
 # Import function modules - handle both package and direct execution
@@ -784,6 +786,89 @@ def ado_list(target: str, organization: str = None, project_name: str = None) ->
         return ado.list_repos(organization, project_name)
     else:
         return f"Invalid target '{target}'. Must be one of: projects, repos"
+
+
+@mcp.tool()
+def ado_manage_work_item(
+    action: Literal["create", "show", "update", "query", "comment"],
+    organization: str,
+    project_name: str,
+    work_item_id: int = None,
+    work_item_type: str = None,
+    title: str = None,
+    description: str = None,
+    assigned_to: str = None,
+    state: str = None,
+    iteration_path: str = None,
+    area_path: str = None,
+    priority: int = None,
+    story_points: float = None,
+    start_date: str = None,
+    target_date: str = None,
+    tags: list[str] = None,
+    parent_id: int = None,
+    comment: str = None,
+    wiql: str = None,
+    top: int = 50,
+) -> str:
+    """
+    Creates, shows, updates, queries, or comments on Azure DevOps work items.
+
+    Required for every action: action, organization, project_name.
+    Action-specific requirements:
+    - create: work_item_type and title
+    - show: work_item_id
+    - update: work_item_id and at least one supported field or parent_id
+    - comment: work_item_id and comment
+    - query: optional WIQL; defaults to recently changed project work items
+
+    Args:
+        action: One of "create", "show", "update", "query", or "comment".
+        organization: Azure DevOps organization URL or organization name.
+        project_name: Azure DevOps project name.
+        work_item_id: Positive work-item ID for show, update, or comment.
+        work_item_type: Type for create, such as "User Story", "Bug", or "Task".
+        title: Work-item title. Required for create.
+        description: Work-item description.
+        assigned_to: Assignee identity recognized by Azure DevOps.
+        state: Workflow state supported by the selected work-item type.
+        iteration_path: Iteration path.
+        area_path: Area path.
+        priority: Integer priority.
+        story_points: Story-point estimate.
+        start_date: Start date in an Azure DevOps-supported ISO 8601 format.
+        target_date: Target date in an Azure DevOps-supported ISO 8601 format.
+        tags: Tags to store as a semicolon-delimited Azure DevOps field.
+        parent_id: Positive parent work-item ID for create or update.
+        comment: Comment text for the comment action.
+        wiql: WIQL SELECT query for the query action.
+        top: Maximum WIQL results, from 1 to 200. Defaults to 50.
+
+    Returns:
+        Structured JSON with success, action, and normalized data or an actionable error.
+    """
+    return ado.manage_work_item(
+        action=action,
+        organization=organization,
+        project_name=project_name,
+        work_item_id=work_item_id,
+        work_item_type=work_item_type,
+        title=title,
+        description=description,
+        assigned_to=assigned_to,
+        state=state,
+        iteration_path=iteration_path,
+        area_path=area_path,
+        priority=priority,
+        story_points=story_points,
+        start_date=start_date,
+        target_date=target_date,
+        tags=tags,
+        parent_id=parent_id,
+        comment=comment,
+        wiql=wiql,
+        top=top,
+    )
 
 
 @mcp.tool()
