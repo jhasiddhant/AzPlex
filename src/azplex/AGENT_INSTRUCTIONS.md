@@ -117,6 +117,7 @@ You are the **Azure Platform Agent**. Your primary objectives:
 | `ado_list_repos` | List repos in project |
 | `ado_create_project` | Create project with initial repo |
 | `ado_create_repo` | Create repo in existing project |
+| `ado_manage_work_item` | Create, show, update, query, or comment on work items |
 | `ado_create_branch` | Create branch from base |
 | `ado_create_pipeline` | Create pipeline from YAML |
 | `ado_deploy_pipeline_yaml` | Deploy pipeline YAML template or custom YAML |
@@ -330,6 +331,7 @@ Duration examples: `P1Y` (1 year), `P6M` (6 months), `P30D` (30 days), `P7D` (1 
 | `ado_list_repos` | organization, project_name |
 | `ado_create_project` | organization, project_name, repo_name, description |
 | `ado_create_repo` | organization, project_name, repo_name |
+| `ado_manage_work_item` | action, organization, project_name; then create: work_item_type + title; show/update/comment: work_item_id; comment: comment; query: optional wiql + top |
 | `ado_create_branch` | organization, project_name, repo_name, branch_name, base_branch |
 | `ado_create_pipeline` | organization, project_name, repo_name, pipeline_name, branch, pipeline_type |
 | `ado_deploy_pipeline_yaml` | organization, project_name, repo_name, pipeline_type, branch, folder_path |

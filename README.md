@@ -41,7 +41,7 @@ Then add to your MCP config (`.vscode/mcp.json`):
 
 ## What It Does
 
-**29 MCP tools** across Azure, Azure DevOps, and Microsoft Fabric — plus **50 Bicep resource types** for infrastructure deployment.
+**30 MCP tools** across Azure, Azure DevOps, and Microsoft Fabric — plus **50 Bicep resource types** for infrastructure deployment.
 
 ### Azure (15 tools)
 
@@ -53,13 +53,14 @@ Then add to your MCP config (`.vscode/mcp.json`):
 | **Security & Identity** | `azure_list_roles` (active/eligible), `azure_assign_role` (RBAC or PIM), `azure_activate_pim_roles`, `azure_deactivate_pim_roles`, `azure_remove_role` (RBAC or PIM) |
 | **Networking** | `azure_manage_pe_connection` (list/approve/reject PE connections) |
 
-### Azure DevOps (7 tools)
+### Azure DevOps (8 tools)
 
 | Tool | Purpose |
 |------|---------|
 | `ado_create_project` | Create project with initial repo |
 | `ado_create_repo` | Create additional repositories |
 | `ado_list` | List projects or repositories |
+| `ado_manage_work_item` | Create, show, update, query, and comment on work items |
 | `ado_create_branch` | Create branches from base branch |
 | `ado_deploy_pipeline_yaml` | Deploy YAML templates or custom YAML to repos |
 | `ado_create_pipeline` | Create pipeline from YAML in repo |
