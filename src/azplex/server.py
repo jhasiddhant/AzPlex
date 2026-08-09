@@ -750,7 +750,8 @@ def ado_create_project(organization: str = None, project_name: str = None, repo_
     """
     Creates an Azure DevOps project using AZ CLI via the PS1 script and sets the initial repo name.
 
-    Behavior: Relies on the PS1 script output entirely (no extra verification).
+    Behavior: Runs creation, then confirms the project via read-back before claiming success.
+    Returns a structured operation result with command status, verification status, and evidence.
     Required: organization (URL or org name), project_name, repo_name; description optional.
     """
     return ado.create_project(organization, project_name, repo_name, description)
@@ -761,7 +762,8 @@ def ado_create_repo(organization: str = None, project_name: str = None, repo_nam
     """
     Creates a new Azure DevOps Git repository via the PS1 script.
 
-    Behavior: Relies on the PS1 script output entirely (no extra verification).
+    Behavior: Runs creation, then confirms the repository via read-back before claiming success.
+    Returns a structured operation result with command status, verification status, and evidence.
     Required: organization (URL or org name), project_name, repo_name.
     """
     return ado.create_repo(organization, project_name, repo_name)
