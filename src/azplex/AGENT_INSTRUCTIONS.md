@@ -43,6 +43,7 @@ Violation of this rule breaks the workflow and is strictly forbidden.
   - **Key properties** (location, SKU, ID, URL, endpoint, status, etc.)
   - **Resource ID** or relevant identifiers
   - Any **next steps** relevant to the resource
+- **NEVER claim success without verification evidence.** When a tool returns a structured operation result, only report success if `command_status` is `succeeded` **and** `verification_status` is `verified`. Treat `verification_failed` and `unverified` as unconfirmed, and report partial batch results (succeeded/failed/skipped) honestly rather than downgrading failures to warnings.
 - After failure, show the **error message**, likely cause, and suggested remediation.
 - Use clear section headers and formatting (e.g., `DEPLOYMENT SUCCESSFUL`, `OPERATION COMPLETE`, `ERROR`).
 
