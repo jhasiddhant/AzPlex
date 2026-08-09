@@ -333,7 +333,9 @@ def azure_get_resource_info(
                               operation_type: "Write", "Delete", or "Action".
             - "custom": Run a custom Azure Resource Graph KQL query (requires custom_query). 
                         Example: "Resources | where type == 'Microsoft.Compute/virtualMachines'"
-            - "cli_raw": Run a raw Azure CLI command (requires custom_query).
+            - "cli_raw": Run a read-only Azure CLI command (requires custom_query).
+                         Only read verbs (show, list, get, etc.) are permitted; mutating and
+                         destructive commands are denied by guardrail policy.
                          Example: "az identity show --name my-uami -g my-rg"
         resource_name: Resource name (for get_resource, find_resource, get_identity, activity_log)
         resource_group: Resource group name (for filtering or specific queries)
@@ -419,7 +421,6 @@ def azure_modify_resource(
             - "set-local-auth": Enable/disable local auth/API keys (storage-account, openai, servicebus)
             - "vnet-integrate": Add VNet integration or network ACL rules
             - "attach": Attach compliance/monitoring (nsp, diagnostic_settings, appinsights, dce_to_dcr)
-            - "cli-raw": Run a raw Azure CLI command (pass command in value)
         resource_name: Name of the Azure resource
         resource_group: Resource group containing the resource
         resource_type: Type of resource (webapp, functionapp, storage-account, key-vault, openai, sql-database, redis, acr, containerapp, servicebus, cosmosdb, etc.)
@@ -428,7 +429,6 @@ def azure_modify_resource(
             - scale: SKU name (e.g., "S1", "P1v3", "Premium")
             - set-public-access: "true" or "false"
             - set-local-auth: "true" (enable) or "false" (disable)
-            - cli-raw: The full Azure CLI command to run
         tags: Tag key-value pairs in format "key1=value1,key2=value2" (for action="tags")
         tags_operation: "merge" (default) or "replace" (for action="tags")
         attach_target: What to attach (for action="attach"): nsp, diagnostic_settings, appinsights, dce_to_dcr
