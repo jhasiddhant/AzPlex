@@ -22,6 +22,11 @@ except ImportError:
         resolve_principal_id
     )
 
+try:
+    from . import verification
+except ImportError:
+    from azplex import verification
+
 
 ADO_RESOURCE_ID = "499b84ac-1321-427f-aa17-267ca6975798"
 ADO_API_VERSION = "7.1"
@@ -378,11 +383,20 @@ def create_project(organization: str = None, project_name: str = None, repo_name
     if description:
         proj_params["Description"] = description
 
-    try:
-        proj_out = run_powershell_script(project_script, proj_params)
-        return proj_out.strip()
-    except Exception as e:
-        return f"Project creation failed\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nScript: {project_script}\nParameters: {proj_params}"
+    def execute():
+        try:
+            return run_powershell_script(project_script, proj_params)
+        except Exception as e:
+            return f"Project creation failed\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nScript: {project_script}\nParameters: {proj_params}"
+
+    def verify():
+        readback = list_projects(organization)
+        return (project_name.strip().lower() in readback.lower(), readback)
+
+    result = verification.run_verified_operation(
+        f"ado_create_project:{project_name}", execute, verify
+    )
+    return result.to_json()
 
 
 def create_repo(organization: str = None, project_name: str = None, repo_name: str = None) -> str:
@@ -415,11 +429,20 @@ def create_repo(organization: str = None, project_name: str = None, repo_name: s
         "RepoName": repo_name
     }
 
-    try:
-        out = run_powershell_script(repo_script, params)
-        return out.strip()
-    except Exception as e:
-        return f"Repository creation failed\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nScript: {repo_script}\nParameters: {params}"
+    def execute():
+        try:
+            return run_powershell_script(repo_script, params)
+        except Exception as e:
+            return f"Repository creation failed\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nScript: {repo_script}\nParameters: {params}"
+
+    def verify():
+        readback = list_repos(organization, project_name)
+        return (repo_name.strip().lower() in readback.lower(), readback)
+
+    result = verification.run_verified_operation(
+        f"ado_create_repo:{repo_name}", execute, verify
+    )
+    return result.to_json()
 
 
 def list_projects(organization: str = None) -> str:
