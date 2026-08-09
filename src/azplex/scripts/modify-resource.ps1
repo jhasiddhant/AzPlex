@@ -7,7 +7,7 @@
     Supports: start, stop, restart, scale, enable/disable public access, enable/disable local auth.
 
 .PARAMETER Action
-    The modification action: start, stop, restart, scale, set-public-access, set-local-auth, update-sku, cli-raw
+    The modification action: start, stop, restart, scale, set-public-access, set-local-auth, update-sku
 
 .PARAMETER ResourceName
     Name of the Azure resource.
@@ -19,7 +19,7 @@
     Type of resource (functionapp, webapp, sql-server, sql-database, containerapp, cosmosdb, openai, storage-account, key-vault, redis, acr, etc.)
 
 .PARAMETER Value
-    Value for the action (e.g., SKU name for scale, "true"/"false" for enable/disable, raw CLI command for cli-raw).
+    Value for the action (e.g., SKU name for scale, "true"/"false" for enable/disable).
 
 .EXAMPLE
     .\modify-resource.ps1 -Action stop -ResourceName "myapp" -ResourceGroup "my-rg" -ResourceType "webapp"
@@ -148,15 +148,14 @@ try {
         }
 
         # ================================================================
-        # RAW CLI COMMAND (for anything not covered above)
+        # RAW CLI COMMAND (retired for safety)
         # ================================================================
         "cli-raw" {
-            if (-not $Value) { Write-Error "Value (CLI command) is required for cli-raw action" }
-            $result = Invoke-Expression $Value 2>&1
+            Write-Error "The cli-raw action has been removed. Use a typed action or azure_create_resource; arbitrary command evaluation is not permitted."
         }
 
         default {
-            Write-Error "Unknown action: $Action. Supported: start, stop, restart, scale, set-public-access, set-local-auth, cli-raw"
+            Write-Error "Unknown action: $Action. Supported: start, stop, restart, scale, set-public-access, set-local-auth"
         }
     }
 

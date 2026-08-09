@@ -25,6 +25,11 @@ except ImportError:
         RESOURCE_VARIANTS, resolve_principal_id
     )
 
+try:
+    from . import guardrails
+except ImportError:
+    from azplex import guardrails
+
 
 # ============================================================================
 # Azure Permissions & Subscriptions
@@ -132,7 +137,16 @@ def query_resources(
             args = shlex.split(cli_cmd)
         except ValueError as e:
             return json.dumps({"error": f"Failed to parse CLI command: {e}"})
-        
+
+        # Enforce read-only policy: no shell evaluation, no mutating/destructive verbs
+        decision = guardrails.evaluate_cli_raw(custom_query, tuple(args))
+        if not decision.allowed:
+            return json.dumps({
+                "error": "Command denied by guardrail policy",
+                "policy": decision.to_dict(),
+                "command": guardrails.redact(custom_query),
+            }, indent=2)
+
         # Add -o json if not already specified
         if "-o" not in args and "--output" not in args:
             args.extend(["-o", "json"])
@@ -144,8 +158,8 @@ def query_resources(
             return json.dumps({"command": custom_query, "result": data}, indent=2)
         except json.JSONDecodeError:
             if "ERROR" in result or "error" in result.lower():
-                return json.dumps({"error": "CLI command failed", "raw_output": result})
-            return json.dumps({"command": custom_query, "result": result})
+                return json.dumps({"error": "CLI command failed", "raw_output": guardrails.redact(result)})
+            return json.dumps({"command": custom_query, "result": guardrails.redact(result)})
     
     elif query_type == "list_rgs":
         cmd = ["az", "group", "list", "--query", "[].{name:name, location:location, state:properties.provisioningState}", "-o", "json"]
@@ -406,13 +420,22 @@ def modify_resource(
     Unified resource modification handler.
     
     Actions: tags, start, stop, restart, scale, set-public-access, set-local-auth,
-             vnet-integrate, attach, cli-raw
+             vnet-integrate, attach
     """
     if not action:
         return "Error: action is required"
     
     action = action.lower().strip()
-    
+
+    # cli-raw is retired: raw shell evaluation is not permitted for mutations.
+    if action == "cli-raw":
+        return json.dumps({
+            "error": "The cli-raw action has been removed by guardrail policy",
+            "policy": {"operation_class": guardrails.MUTATE, "allowed": False},
+            "hint": "Use a typed action (tags, start, stop, restart, scale, set-public-access, "
+                    "set-local-auth, vnet-integrate, attach) or azure_create_resource.",
+        }, indent=2)
+
     # Tags - handled by existing function
     if action == "tags":
         return update_tags(resource_id, resource_name, resource_group, resource_type, tags, tags_operation)
