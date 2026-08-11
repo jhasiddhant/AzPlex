@@ -23,9 +23,9 @@ except ImportError:
     )
 
 try:
-    from . import verification
+    from . import guardrails
 except ImportError:
-    from azplex import verification
+    from azplex import guardrails
 
 
 ADO_RESOURCE_ID = "499b84ac-1321-427f-aa17-267ca6975798"
@@ -393,7 +393,7 @@ def create_project(organization: str = None, project_name: str = None, repo_name
         readback = list_projects(organization)
         return (project_name.strip().lower() in readback.lower(), readback)
 
-    result = verification.run_verified_operation(
+    result = guardrails.run_verified_operation(
         f"ado_create_project:{project_name}", execute, verify
     )
     return result.to_json()
@@ -439,7 +439,7 @@ def create_repo(organization: str = None, project_name: str = None, repo_name: s
         readback = list_repos(organization, project_name)
         return (repo_name.strip().lower() in readback.lower(), readback)
 
-    result = verification.run_verified_operation(
+    result = guardrails.run_verified_operation(
         f"ado_create_repo:{repo_name}", execute, verify
     )
     return result.to_json()

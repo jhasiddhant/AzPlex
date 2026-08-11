@@ -227,6 +227,67 @@ def azure_activate_pim_roles(
 
 
 @mcp.tool()
+def azure_schedule_pim_activation(
+    justification: str,
+    mode: str,
+    scope: str = None,
+    principal_id: str = None,
+    role_definition_id: str = None,
+    timestamps: list = None,
+    daily_times: list = None,
+    pattern: str = "daily",
+    duration_hours: int = 8,
+    horizon_days: int = 7,
+    tz_name: str = None,
+) -> str:
+    """
+    Schedules future or recurring PIM role activations.
+
+    CRITICAL: Justification is MANDATORY — ask the user before calling. Confirm the
+    plan (windows, duration, timezone) with the user before submitting.
+
+    Two modes:
+    1. mode="schedule_activate": one-shot future activations. Provide `timestamps`
+       (ISO 8601). Naive timestamps use `tz_name`; all are normalized to UTC.
+    2. mode="schedule_continuous": recurring activations. Provide `daily_times`
+       (list of "HH:MM") and `pattern` ("daily" or "weekdays"). Expansion is bounded
+       by `horizon_days` (max 30).
+
+    Past, overlapping, duplicate, and beyond-horizon windows are rejected and reported.
+    Submission requires scope, principal_id, and role_definition_id.
+
+    Args:
+        justification: Business justification (REQUIRED - must come from user).
+        mode: "schedule_activate" or "schedule_continuous".
+        scope: Azure scope for the activation (subscription or resource group).
+        principal_id: Object ID of the principal to activate for.
+        role_definition_id: Role definition ID or full role definition resource ID.
+        timestamps: ISO 8601 timestamps for schedule_activate.
+        daily_times: List of "HH:MM" slots for schedule_continuous.
+        pattern: "daily" or "weekdays" for schedule_continuous.
+        duration_hours: Activation duration in hours (1-24, default 8).
+        horizon_days: Scheduling horizon in days (1-30, default 7).
+        tz_name: IANA timezone for naive timestamps and recurring slots (e.g. "America/New_York").
+
+    Returns:
+        JSON with the scheduled windows, per-request results, and succeeded/failed/skipped counts.
+    """
+    return azure.schedule_pim_activation(
+        justification=justification,
+        mode=mode,
+        scope=scope,
+        principal_id=principal_id,
+        role_definition_id=role_definition_id,
+        timestamps=timestamps,
+        daily_times=daily_times,
+        pattern=pattern,
+        duration_hours=duration_hours,
+        horizon_days=horizon_days,
+        tz_name=tz_name,
+    )
+
+
+@mcp.tool()
 def azure_deactivate_pim_roles(
     deactivate_all: bool = False,
     subscription_name: str = None,
