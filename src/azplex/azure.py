@@ -30,6 +30,11 @@ try:
 except ImportError:
     from azplex import guardrails
 
+try:
+    from . import scheduling
+except ImportError:
+    from azplex import scheduling
+
 
 # ============================================================================
 # Azure Permissions & Subscriptions
@@ -2393,7 +2398,124 @@ def activate_pim_roles(
         return f"Failed to activate PIM roles\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nCommon causes:\n- Not authenticated: Run 'Connect-AzAccount'\n- No eligible PIM roles at the specified scope\n- Duration exceeds maximum allowed by policy\n- Role requires approval (check PIM portal)\n- Az.Resources module not installed"
 
 
+def _submit_scheduled_activation(scope, principal_id, role_definition_id, justification, window):
+    """Submits a single future PIM activation via az rest; returns a structured result."""
+    import uuid
+
+    request_id = str(uuid.uuid4())
+    role_definition = role_definition_id
+    if role_definition and not role_definition.startswith("/"):
+        role_definition = f"{scope}/providers/Microsoft.Authorization/roleDefinitions/{role_definition_id}"
+
+    body = {
+        "properties": {
+            "principalId": principal_id,
+            "roleDefinitionId": role_definition,
+            "requestType": "SelfActivate",
+            "justification": justification,
+            "scheduleInfo": {
+                "startDateTime": window.start_utc.isoformat().replace("+00:00", "Z"),
+                "expiration": {"type": "AfterDuration", "duration": f"PT{int(window.duration_hours)}H"},
+            },
+        }
+    }
+    url = (
+        f"https://management.azure.com{scope}/providers/Microsoft.Authorization/"
+        f"roleAssignmentScheduleRequests/{request_id}?api-version=2020-10-01"
+    )
+    output = run_command([
+        "az", "rest", "--method", "put", "--url", url,
+        "--body", json.dumps(body), "--headers", "Content-Type=application/json",
+    ])
+    failed = "error" in output.lower() or "[exit code:" in output.lower()
+    return {
+        "request_id": request_id,
+        "window": window.to_dict(),
+        "status": "failed" if failed else "scheduled",
+        "detail": guardrails.redact(output.strip()),
+    }
+
+
+def schedule_pim_activation(
+    justification: str = None,
+    mode: str = None,
+    scope: str = None,
+    principal_id: str = None,
+    role_definition_id: str = None,
+    timestamps: list = None,
+    daily_times: list = None,
+    pattern: str = "daily",
+    duration_hours: int = 8,
+    horizon_days: int = 7,
+    tz_name: str = None,
+    now=None,
+    submitter=None,
+) -> str:
+    """
+    Schedules future or recurring PIM activations.
+
+    mode="schedule_activate": one-shot future activations from `timestamps`.
+    mode="schedule_continuous": recurring `pattern` (daily/weekdays) at `daily_times`.
+    """
+    if not justification:
+        return json.dumps({"error": "justification is required and must come from the user"})
+    if mode not in ("schedule_activate", "schedule_continuous"):
+        return json.dumps({"error": "mode must be 'schedule_activate' or 'schedule_continuous'"})
+    if not isinstance(duration_hours, int) or not 1 <= duration_hours <= 24:
+        return json.dumps({"error": "duration_hours must be an integer from 1 to 24"})
+
+    try:
+        if mode == "schedule_activate":
+            accepted, skipped = scheduling.build_one_shot_windows(
+                timestamps, duration_hours, tz_name=tz_name, horizon_days=horizon_days, now=now
+            )
+        else:
+            accepted, skipped = scheduling.build_recurring_windows(
+                daily_times, duration_hours, pattern=pattern,
+                horizon_days=horizon_days, tz_name=tz_name, now=now,
+            )
+    except scheduling.ScheduleError as error:
+        return json.dumps({"error": f"Invalid schedule: {error}"})
+
+    if not accepted:
+        return json.dumps({
+            "mode": mode,
+            "success": False,
+            "message": "No valid activation windows to schedule.",
+            "skipped": skipped,
+        }, indent=2)
+
+    submit = submitter
+    if submit is None:
+        if not (scope and principal_id and role_definition_id):
+            return json.dumps({
+                "error": "scope, principal_id, and role_definition_id are required to submit scheduled activations",
+                "planned_windows": [w.to_dict() for w in accepted],
+                "skipped": skipped,
+            }, indent=2)
+        submit = lambda window: _submit_scheduled_activation(
+            scope, principal_id, role_definition_id, justification, window
+        )
+
+    results = [submit(window) for window in accepted]
+    succeeded = sum(1 for r in results if r.get("status") == "scheduled")
+    failed = sum(1 for r in results if r.get("status") == "failed")
+    return json.dumps({
+        "mode": mode,
+        "success": failed == 0,
+        "counts": {
+            "planned": len(accepted),
+            "succeeded": succeeded,
+            "failed": failed,
+            "skipped": len(skipped),
+        },
+        "results": results,
+        "skipped": skipped,
+    }, indent=2)
+
+
 def assign_pim_eligible_role(
+
     scope: str = None,
     principal_id: str = None,
     role_name: str = None,
