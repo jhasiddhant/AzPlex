@@ -7,6 +7,12 @@ import re
 import json
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - Python < 3.9 fallback
+    ZoneInfo = None
 
 try:
     from .utils import (
@@ -2393,7 +2399,265 @@ def activate_pim_roles(
         return f"Failed to activate PIM roles\n\nError: {str(e)}\nError Type: {type(e).__name__}\n\nCommon causes:\n- Not authenticated: Run 'Connect-AzAccount'\n- No eligible PIM roles at the specified scope\n- Duration exceeds maximum allowed by policy\n- Role requires approval (check PIM portal)\n- Az.Resources module not installed"
 
 
+# ============================================================================
+# PIM SCHEDULING - Deterministic activation window planning
+# ============================================================================
+
+DAILY = "daily"
+WEEKDAYS = "weekdays"
+
+# Recurring expansion is capped to keep request volume and horizon bounded.
+MAX_HORIZON_DAYS = 30
+
+
+class ScheduleError(Exception):
+    """Raised when a schedule request is invalid."""
+
+
+def _tzinfo(tz_name):
+    if not tz_name or tz_name.upper() == "UTC":
+        return timezone.utc
+    if ZoneInfo is None:
+        raise ScheduleError("Timezone support requires Python 3.9+ (zoneinfo).")
+    try:
+        return ZoneInfo(tz_name)
+    except Exception as error:
+        raise ScheduleError(f"Unknown timezone '{tz_name}': {error}")
+
+
+def normalize_to_utc(value, tz_name=None):
+    """Parses an ISO 8601 timestamp and returns a timezone-aware UTC datetime."""
+    if not value or not value.strip():
+        raise ScheduleError("timestamp is required")
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as error:
+        raise ScheduleError(f"Invalid ISO 8601 timestamp '{value}': {error}")
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_tzinfo(tz_name))
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_hhmm(slot):
+    try:
+        hour_text, minute_text = slot.strip().split(":")
+        hour, minute = int(hour_text), int(minute_text)
+    except (ValueError, AttributeError):
+        raise ScheduleError(f"Invalid time slot '{slot}'; expected HH:MM")
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ScheduleError(f"Time slot '{slot}' is out of range")
+    return hour, minute
+
+
+class Window:
+    """A single planned activation window in UTC."""
+
+    def __init__(self, start_utc, duration_hours):
+        self.start_utc = start_utc
+        self.duration_hours = duration_hours
+        self.end_utc = start_utc + timedelta(hours=duration_hours)
+
+    def overlaps(self, other):
+        return self.start_utc < other.end_utc and other.start_utc < self.end_utc
+
+    def to_dict(self):
+        return {
+            "start": self.start_utc.isoformat(),
+            "end": self.end_utc.isoformat(),
+            "duration_hours": self.duration_hours,
+        }
+
+
+def _dedupe_and_flag_overlaps(windows):
+    accepted = []
+    skipped = []
+    for window in sorted(windows, key=lambda w: w.start_utc):
+        duplicate = any(existing.start_utc == window.start_utc for existing in accepted)
+        if duplicate:
+            skipped.append({"start": window.start_utc.isoformat(), "reason": "duplicate"})
+            continue
+        if any(window.overlaps(existing) for existing in accepted):
+            skipped.append({"start": window.start_utc.isoformat(), "reason": "overlaps an earlier window"})
+            continue
+        accepted.append(window)
+    return accepted, skipped
+
+
+def _bounded_horizon(horizon_days):
+    if horizon_days < 1:
+        raise ScheduleError("horizon_days must be at least 1")
+    return min(horizon_days, MAX_HORIZON_DAYS)
+
+
+def build_one_shot_windows(timestamps, duration_hours, *, tz_name=None, horizon_days=MAX_HORIZON_DAYS, now=None):
+    """Builds windows for explicit future timestamps (schedule_activate mode)."""
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    horizon = reference + timedelta(days=_bounded_horizon(horizon_days))
+    candidates = []
+    skipped = []
+    for stamp in timestamps or []:
+        start = normalize_to_utc(stamp, tz_name)
+        if start <= reference:
+            skipped.append({"start": start.isoformat(), "reason": "timestamp is in the past"})
+            continue
+        if start > horizon:
+            skipped.append({"start": start.isoformat(), "reason": "beyond scheduling horizon"})
+            continue
+        candidates.append(Window(start, duration_hours))
+    accepted, overlap_skips = _dedupe_and_flag_overlaps(candidates)
+    return accepted, skipped + overlap_skips
+
+
+def build_recurring_windows(daily_times, duration_hours, *, pattern=DAILY, horizon_days=7, tz_name=None, now=None):
+    """Expands a daily or weekday recurring pattern into bounded UTC windows."""
+    if pattern not in (DAILY, WEEKDAYS):
+        raise ScheduleError(f"Unknown pattern '{pattern}'; use '{DAILY}' or '{WEEKDAYS}'")
+    if not daily_times:
+        raise ScheduleError("At least one daily time slot is required")
+
+    tz = _tzinfo(tz_name)
+    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    local_today = reference.astimezone(tz).date()
+    horizon = _bounded_horizon(horizon_days)
+    slots = [_parse_hhmm(slot) for slot in daily_times]
+
+    candidates = []
+    skipped = []
+    for day_offset in range(horizon + 1):
+        day = local_today + timedelta(days=day_offset)
+        if pattern == WEEKDAYS and day.weekday() >= 5:
+            continue
+        for hour, minute in slots:
+            local_start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
+            start = local_start.astimezone(timezone.utc)
+            if start <= reference:
+                continue
+            candidates.append(Window(start, duration_hours))
+
+    accepted, overlap_skips = _dedupe_and_flag_overlaps(candidates)
+    return accepted, skipped + overlap_skips
+
+
+def _submit_scheduled_activation(scope, principal_id, role_definition_id, justification, window):
+    """Submits a single future PIM activation via az rest; returns a structured result."""
+    import uuid
+
+    request_id = str(uuid.uuid4())
+    role_definition = role_definition_id
+    if role_definition and not role_definition.startswith("/"):
+        role_definition = f"{scope}/providers/Microsoft.Authorization/roleDefinitions/{role_definition_id}"
+
+    body = {
+        "properties": {
+            "principalId": principal_id,
+            "roleDefinitionId": role_definition,
+            "requestType": "SelfActivate",
+            "justification": justification,
+            "scheduleInfo": {
+                "startDateTime": window.start_utc.isoformat().replace("+00:00", "Z"),
+                "expiration": {"type": "AfterDuration", "duration": f"PT{int(window.duration_hours)}H"},
+            },
+        }
+    }
+    url = (
+        f"https://management.azure.com{scope}/providers/Microsoft.Authorization/"
+        f"roleAssignmentScheduleRequests/{request_id}?api-version=2020-10-01"
+    )
+    output = run_command([
+        "az", "rest", "--method", "put", "--url", url,
+        "--body", json.dumps(body), "--headers", "Content-Type=application/json",
+    ])
+    failed = "error" in output.lower() or "[exit code:" in output.lower()
+    return {
+        "request_id": request_id,
+        "window": window.to_dict(),
+        "status": "failed" if failed else "scheduled",
+        "detail": guardrails.redact(output.strip()),
+    }
+
+
+def schedule_pim_activation(
+    justification: str = None,
+    mode: str = None,
+    scope: str = None,
+    principal_id: str = None,
+    role_definition_id: str = None,
+    timestamps: list = None,
+    daily_times: list = None,
+    pattern: str = "daily",
+    duration_hours: int = 8,
+    horizon_days: int = 7,
+    tz_name: str = None,
+    now=None,
+    submitter=None,
+) -> str:
+    """
+    Schedules future or recurring PIM activations.
+
+    mode="schedule_activate": one-shot future activations from `timestamps`.
+    mode="schedule_continuous": recurring `pattern` (daily/weekdays) at `daily_times`.
+    """
+    if not justification:
+        return json.dumps({"error": "justification is required and must come from the user"})
+    if mode not in ("schedule_activate", "schedule_continuous"):
+        return json.dumps({"error": "mode must be 'schedule_activate' or 'schedule_continuous'"})
+    if not isinstance(duration_hours, int) or not 1 <= duration_hours <= 24:
+        return json.dumps({"error": "duration_hours must be an integer from 1 to 24"})
+
+    try:
+        if mode == "schedule_activate":
+            accepted, skipped = build_one_shot_windows(
+                timestamps, duration_hours, tz_name=tz_name, horizon_days=horizon_days, now=now
+            )
+        else:
+            accepted, skipped = build_recurring_windows(
+                daily_times, duration_hours, pattern=pattern,
+                horizon_days=horizon_days, tz_name=tz_name, now=now,
+            )
+    except ScheduleError as error:
+        return json.dumps({"error": f"Invalid schedule: {error}"})
+
+    if not accepted:
+        return json.dumps({
+            "mode": mode,
+            "success": False,
+            "message": "No valid activation windows to schedule.",
+            "skipped": skipped,
+        }, indent=2)
+
+    submit = submitter
+    if submit is None:
+        if not (scope and principal_id and role_definition_id):
+            return json.dumps({
+                "error": "scope, principal_id, and role_definition_id are required to submit scheduled activations",
+                "planned_windows": [w.to_dict() for w in accepted],
+                "skipped": skipped,
+            }, indent=2)
+        submit = lambda window: _submit_scheduled_activation(
+            scope, principal_id, role_definition_id, justification, window
+        )
+
+    results = [submit(window) for window in accepted]
+    succeeded = sum(1 for r in results if r.get("status") == "scheduled")
+    failed = sum(1 for r in results if r.get("status") == "failed")
+    return json.dumps({
+        "mode": mode,
+        "success": failed == 0,
+        "counts": {
+            "planned": len(accepted),
+            "succeeded": succeeded,
+            "failed": failed,
+            "skipped": len(skipped),
+        },
+        "results": results,
+        "skipped": skipped,
+    }, indent=2)
+
+
 def assign_pim_eligible_role(
+
     scope: str = None,
     principal_id: str = None,
     role_name: str = None,
