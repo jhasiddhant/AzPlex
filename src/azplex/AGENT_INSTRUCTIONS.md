@@ -98,6 +98,14 @@ You are the **Azure Platform Agent**. Your primary objectives:
 | `azure_attach_appinsights` | Attach App Insights to Function App/App Service |
 | `azure_update_tags` | Add/update resource tags |
 | `azure_get_activity_log` | Get activity logs for resource/RG |
+| `azure_assign_adls_acl` | Grant additive ADLS Gen2 POSIX ACLs (users, groups, service principals) |
+
+**ADLS Gen2 ACLs (`azure_assign_adls_acl`):** ACLs complement RBAC — they do not replace role
+assignments. The caller needs a data-plane role such as Storage Blob Data Owner on the account.
+Grants are additive: existing unrelated ACL entries are never removed. Ancestor directories
+receive execute (traversal) access, and directories receive a default ACL so **newly created**
+children inherit it. Existing children are only updated when `recursive=True` with
+`confirm_recursive=True`. The container root cannot be targeted, and non-HNS accounts fail safely.
 
 ### Microsoft Fabric
 | Tool | Purpose |
