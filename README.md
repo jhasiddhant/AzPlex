@@ -41,16 +41,16 @@ Then add to your MCP config (`.vscode/mcp.json`):
 
 ## What It Does
 
-**31 MCP tools** across Azure, Azure DevOps, and Microsoft Fabric — plus **50 Bicep resource types** for infrastructure deployment.
+**32 MCP tools** across Azure, Azure DevOps, and Microsoft Fabric — plus **50 Bicep resource types** for infrastructure deployment.
 
-### Azure (16 tools)
+### Azure (17 tools)
 
 | Category | Tools |
 |----------|-------|
 | **Auth & Account** | `azure_login`, `azure_list_subscriptions`, `azure_set_subscription`, `get_current_user`, `show_agent_instructions` |
 | **Resource Info** | `azure_get_resource_info` — unified query tool (list resources/RGs, find resources, get identity, activity logs, Resource Graph KQL, raw CLI) |
 | **Resource Management** | `azure_create_resource_group`, `azure_create_resource` (50 Bicep templates), `azure_modify_resource` (tags, start/stop/restart, scale, public access, local auth, VNet integration, attach NSP/diagnostics/AppInsights/DCE) |
-| **Security & Identity** | `azure_list_roles` (active/eligible), `azure_assign_role` (RBAC or PIM), `azure_activate_pim_roles`, `azure_schedule_pim_activation` (future/recurring), `azure_deactivate_pim_roles`, `azure_remove_role` (RBAC or PIM) |
+| **Security & Identity** | `azure_list_roles` (active/eligible), `azure_assign_role` (RBAC or PIM), `azure_activate_pim_roles`, `azure_schedule_pim_activation` (future/recurring), `azure_deactivate_pim_roles`, `azure_remove_role` (RBAC or PIM), `azure_assign_adls_acl` (ADLS Gen2 POSIX ACLs) |
 | **Networking** | `azure_manage_pe_connection` (list/approve/reject PE connections) |
 
 ### Azure DevOps (8 tools)
