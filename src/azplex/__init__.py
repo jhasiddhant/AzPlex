@@ -1,5 +1,6 @@
 """azplex - MCP server for Azure, Microsoft Fabric, and Azure DevOps."""
 
+__version__ = "1.0.1"
 __all__ = ["mcp", "main"]
 
 
