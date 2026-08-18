@@ -48,17 +48,18 @@ Or use `uvx`:
 
 ## Features
 
-### Azure (15 tools)
+### Azure (17 tools)
 
 - **Auth & Account** — Login, list/set subscriptions, get current user
-- **Resource Info** — Unified query tool: list resources/RGs, find resources, get managed identity, activity logs, Resource Graph KQL, raw CLI
+- **Resource Info** — Unified query tool: list resources/RGs, find resources, get managed identity, activity logs, Resource Graph KQL, read-only CLI
 - **Resource Management** — Create resource groups, deploy 50 resource types via Bicep, modify resources (tags, start/stop/restart, scale, public access, local auth, VNet integration, attach NSP/diagnostics/AppInsights/DCE)
-- **Security & Identity** — List RBAC roles (active/eligible), assign/remove roles (RBAC or PIM), activate/deactivate PIM roles
+- **Security & Identity** — List RBAC roles (active/eligible), assign/remove roles (RBAC or PIM), activate/deactivate PIM roles, schedule future/recurring PIM activation, grant additive ADLS Gen2 POSIX ACLs
 - **Networking** — Manage PE connections (list/approve/reject)
 
-### Azure DevOps (7 tools)
+### Azure DevOps (8 tools)
 
 - List/create projects and repositories
+- Create, show, update, query, and comment on work items
 - Create branches, deploy YAML pipelines
 - Assign security group roles
 
