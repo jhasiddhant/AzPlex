@@ -8,6 +8,7 @@ import re
 import shutil
 import json
 import platform
+from datetime import datetime
 from typing import Dict, Tuple, Optional
 
 # ============================================================================
@@ -442,26 +443,48 @@ def resolve_principal_id(identifier: str) -> tuple:
         if obj_id and guid_pattern.match(obj_id):
             return (obj_id, "User")
         return (None, f"Could not resolve user '{identifier}'. Verify the email/UPN is correct.")
-    
-    # Try as user display name
-    result = run_command(["az", "ad", "user", "list", "--filter", f"displayName eq '{identifier}'", "--query", "[0].id", "-o", "tsv"])
-    obj_id = result.strip().split('\n')[0].strip()
-    if obj_id and guid_pattern.match(obj_id):
-        return (obj_id, "User")
-    
-    # Try as group name
-    result = run_command(["az", "ad", "group", "show", "--group", identifier, "--query", "id", "-o", "tsv"])
-    obj_id = result.strip().split('\n')[0].strip()
-    if obj_id and guid_pattern.match(obj_id):
-        return (obj_id, "Group")
-    
-    # Try as service principal / managed identity display name
-    result = run_command(["az", "ad", "sp", "list", "--filter", f"displayName eq '{identifier}'", "--query", "[0].id", "-o", "tsv"])
-    obj_id = result.strip().split('\n')[0].strip()
-    if obj_id and guid_pattern.match(obj_id):
-        return (obj_id, "ServicePrincipal")
-    
-    return (None, f"Could not resolve '{identifier}' as a user, group, or service principal. Provide a valid email, display name, group name, SPN/MI name, or Object ID (GUID).")
+
+    # Collect all matching principals across types (ambiguity-aware, not first-match)
+    candidates = []
+    candidates += _list_principals("User", [
+        "az", "ad", "user", "list", "--filter", f"displayName eq '{identifier}'",
+        "--query", "[].{id:id,label:userPrincipalName}", "-o", "json",
+    ])
+    candidates += _list_principals("Group", [
+        "az", "ad", "group", "list", "--filter", f"displayName eq '{identifier}'",
+        "--query", "[].{id:id,label:displayName}", "-o", "json",
+    ])
+    candidates += _list_principals("ServicePrincipal", [
+        "az", "ad", "sp", "list", "--filter", f"displayName eq '{identifier}'",
+        "--query", "[].{id:id,label:appId}", "-o", "json",
+    ])
+
+    unique = {c["id"]: c for c in candidates if c.get("id")}
+    if not unique:
+        return (None, f"Could not resolve '{identifier}' as a user, group, or service principal. Provide a valid email, display name, group name, SPN/MI name, or Object ID (GUID).")
+    if len(unique) > 1:
+        listing = "\n".join(
+            f"  - {c['type']}: {c['id']} ({c.get('label') or 'n/a'})" for c in unique.values()
+        )
+        return (None, f"'{identifier}' is ambiguous — {len(unique)} principals match. Re-run with the exact Object ID:\n{listing}")
+
+    only = next(iter(unique.values()))
+    return (only["id"], only["type"])
+
+
+def _list_principals(principal_type: str, command: list) -> list:
+    """Runs an az principal list query and returns [{id,label,type}] candidates."""
+    result = run_command(command)
+    try:
+        rows = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(rows, list):
+        return []
+    return [
+        {"id": (row.get("id") or "").strip(), "label": row.get("label"), "type": principal_type}
+        for row in rows if isinstance(row, dict) and row.get("id")
+    ]
 
 
 def run_command(command: list[str]) -> str:
@@ -1172,6 +1195,115 @@ def format_deployment_details(resource_type: str, resource_group: str, parameter
     return "\n".join(details)
 
 
+# ============================================================================
+# VALIDATION - Reusable input validators
+# ============================================================================
+
+_GUID_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+_RESOURCE_ID_RE = re.compile(r'^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/.+', re.IGNORECASE)
+_URL_RE = re.compile(r'^https://[^\s/$.?#].[^\s]*$', re.IGNORECASE)
+_SECRET_FIELD_RE = re.compile(r'(pass|secret|key|token|pwd|cred|sas|connection)', re.IGNORECASE)
+
+
+def _safe_value(field: str, value) -> str:
+    """Redacts a value when the field name suggests it is sensitive."""
+    if field and _SECRET_FIELD_RE.search(field):
+        return "***REDACTED***"
+    return str(value)
+
+
+def _constraint_error(field: str, value, expected: str) -> str:
+    """Builds a normalized validation error identifying field, value, and constraint."""
+    return f"{field}: received '{_safe_value(field, value)}', expected {expected}"
+
+
+def is_guid(value) -> bool:
+    return bool(value) and bool(_GUID_RE.match(str(value).strip()))
+
+
+def validate_guid(field: str, value) -> Optional[str]:
+    if not is_guid(value):
+        return _constraint_error(field, value, "a GUID (8-4-4-4-12 hex)")
+    return None
+
+
+def validate_azure_resource_id(field: str, value) -> Optional[str]:
+    if not value or not _RESOURCE_ID_RE.match(str(value).strip()):
+        return _constraint_error(field, value, "an Azure resource ID (/subscriptions/.../resourceGroups/.../providers/...)")
+    return None
+
+
+def validate_url(field: str, value) -> Optional[str]:
+    if not value or not _URL_RE.match(str(value).strip()):
+        return _constraint_error(field, value, "an https:// URL")
+    return None
+
+
+def validate_enum(field: str, value, allowed) -> Optional[str]:
+    if str(value).strip("'\"") not in allowed:
+        return _constraint_error(field, value, f"one of: {', '.join(map(str, allowed))}")
+    return None
+
+
+def validate_date(field: str, value) -> Optional[str]:
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        datetime.fromisoformat(text)
+    except (ValueError, TypeError):
+        return _constraint_error(field, value, "an ISO 8601 date/time")
+    return None
+
+
+def validate_numeric_range(field: str, value, min_value=None, max_value=None) -> Optional[str]:
+    try:
+        number = float(str(value).strip())
+    except (ValueError, TypeError):
+        return _constraint_error(field, value, "a number")
+    if min_value is not None and number < min_value:
+        return _constraint_error(field, value, f"a value >= {min_value}")
+    if max_value is not None and number > max_value:
+        return _constraint_error(field, value, f"a value <= {max_value}")
+    return None
+
+
+def validate_length(field: str, value, min_length=None, max_length=None) -> Optional[str]:
+    length = len(str(value))
+    if min_length is not None and length < min_length:
+        return _constraint_error(field, value, f"length >= {min_length} (got {length})")
+    if max_length is not None and length > max_length:
+        return _constraint_error(field, value, f"length <= {max_length} (got {length})")
+    return None
+
+
+def check_parameter_constraints(provided: Dict[str, str], param_metadata: Dict[str, dict]) -> list:
+    """Validates provided values against parsed Bicep decorators; returns normalized errors."""
+    errors = []
+    for name, value in provided.items():
+        if value in (None, ""):
+            continue
+        meta = param_metadata.get(name)
+        if not meta:
+            continue
+        text = str(value).strip("'\"")
+
+        allowed = meta.get("allowed") or []
+        if allowed:
+            error = validate_enum(name, text, allowed)
+            if error:
+                errors.append(error)
+            continue
+
+        length_error = validate_length(name, text, meta.get("min_length"), meta.get("max_length"))
+        if length_error:
+            errors.append(length_error)
+
+        if meta.get("min_value") is not None or meta.get("max_value") is not None:
+            range_error = validate_numeric_range(name, text, meta.get("min_value"), meta.get("max_value"))
+            if range_error:
+                errors.append(range_error)
+    return errors
+
+
 def parse_bicep_parameters(template_path: str) -> Tuple[Dict[str, Tuple[bool, Optional[str]]], Dict[str, dict]]:
     """Parse bicep template to extract parameters, @allowed values, @description, and constraints.
     
@@ -1293,21 +1425,12 @@ def validate_bicep_parameters(resource_type: str, provided: Dict[str, str]) -> T
     missing = [p for p, (req, _) in params.items() if req and p not in auto_calculated and (p not in provided or provided[p] in (None, ""))]
     if missing:
         return False, f"Missing required parameters: {', '.join(missing)}", params
-    
-    # Validate @allowed values
-    invalid_values = []
-    for param_name, value in provided.items():
-        if param_name in param_metadata and value not in (None, ""):
-            meta = param_metadata[param_name]
-            allowed = meta.get('allowed', [])
-            if allowed and str(value).strip("'\"") not in allowed:
-                invalid_values.append(
-                    f"  - {param_name}: '{value}' is not valid. Allowed values: {', '.join(allowed)}"
-                )
-    
-    if invalid_values:
-        return False, "Invalid parameter values:\n" + "\n".join(invalid_values), params
-    
+
+    # Validate @allowed values and @minLength/@maxLength/@minValue/@maxValue decorators
+    constraint_errors = check_parameter_constraints(provided, param_metadata)
+    if constraint_errors:
+        return False, "Invalid parameter values:\n" + "\n".join(f"  - {e}" for e in constraint_errors), params
+
     return True, "OK", params
 
 
