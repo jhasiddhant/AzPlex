@@ -537,6 +537,56 @@ def azure_modify_resource(
 
 
 @mcp.tool()
+def azure_assign_adls_acl(
+    path: str,
+    object_id: str,
+    identity_type: str = "user",
+    permissions: str = "r-x",
+    is_directory: bool = True,
+    apply_traversal: bool = True,
+    recursive: bool = False,
+    confirm_recursive: bool = False,
+) -> str:
+    """
+    Grants additive ADLS Gen2 POSIX ACLs for a user, group, or service principal.
+
+    Adds execute (traversal) ACLs on ancestor directories and access (plus default,
+    for directories) ACLs on the target. Existing unrelated ACL entries are preserved,
+    and every phase is confirmed with read-back evidence.
+
+    RBAC prerequisite: the caller needs Storage Blob Data Owner (or equivalent) on the
+    account. ACLs complement RBAC; they do not replace role assignments. Default ACLs
+    only affect newly created children — set recursive=True (with confirm_recursive=True)
+    to propagate to existing children.
+
+    Args:
+        path: ADLS Gen2 path (abfss://<container>@<account>.dfs.core.windows.net/<path>
+              or https://<account>.dfs.core.windows.net/<container>/<path>). The container
+              root is rejected.
+        object_id: Entra object ID of the principal to grant access to.
+        identity_type: "user", "group", or "servicePrincipal".
+        permissions: POSIX permissions for the target (e.g. "r-x", "rwx").
+        is_directory: Whether the target is a directory (adds a default ACL for inheritance).
+        apply_traversal: Add execute ACLs on ancestor directories (default True).
+        recursive: Propagate the ACL to existing children (requires confirm_recursive).
+        confirm_recursive: Explicit confirmation gate for recursive updates.
+
+    Returns:
+        JSON batch result with per-phase read-back verification and succeeded/failed/skipped counts.
+    """
+    return azure.assign_adls_acl(
+        path=path,
+        object_id=object_id,
+        identity_type=identity_type,
+        permissions=permissions,
+        is_directory=is_directory,
+        apply_traversal=apply_traversal,
+        recursive=recursive,
+        confirm_recursive=confirm_recursive,
+    )
+
+
+@mcp.tool()
 def azure_create_resource(resource_type: str, resource_group: str = None, parameters: str = None) -> str:
     """Interactive Azure resource creation using Bicep templates.
     

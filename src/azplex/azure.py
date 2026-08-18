@@ -3126,3 +3126,239 @@ Optional:
     output_lines.append(result)
     
     return "\n".join(output_lines)
+
+
+# ============================================================================
+# ADLS GEN2 ACL - Safe, additive POSIX ACL workflows
+# ============================================================================
+
+class AdlsPathError(Exception):
+    """Raised when an ADLS Gen2 path is invalid or targets the container root."""
+
+
+def parse_adls_path(path):
+    """
+    Normalizes an ADLS Gen2 path into (account, container, target_path).
+
+    Supports abfss://container@account.dfs.core.windows.net/target and
+    https://account.dfs.core.windows.net/container/target formats.
+    """
+    if not path or not path.strip():
+        raise AdlsPathError("path is required")
+    text = path.strip()
+
+    if text.startswith("abfss://"):
+        remainder = text[len("abfss://"):]
+        if "@" not in remainder:
+            raise AdlsPathError("abfss path must be abfss://<container>@<account>.dfs.core.windows.net/<path>")
+        container, host_and_path = remainder.split("@", 1)
+        host, _, target = host_and_path.partition("/")
+        account = host.split(".")[0]
+    elif text.startswith("https://"):
+        remainder = text[len("https://"):]
+        host, _, container_and_path = remainder.partition("/")
+        account = host.split(".")[0]
+        container, _, target = container_and_path.partition("/")
+    else:
+        raise AdlsPathError("path must start with abfss:// or https://")
+
+    if not account or not container:
+        raise AdlsPathError("path must include both an account and a container")
+
+    target = target.strip("/")
+    if not target:
+        raise AdlsPathError("Refusing to modify the container root; specify a target path")
+
+    return {"account": account, "container": container, "path": target}
+
+
+def _map_posix_type(identity_type):
+    """Maps an identity type to its POSIX ACL entry type."""
+    normalized = (identity_type or "").strip().lower()
+    if normalized in ("user", "serviceprincipal", "spn", "service_principal"):
+        return "user"
+    if normalized == "group":
+        return "group"
+    raise AdlsPathError("identity_type must be 'user', 'group', or 'servicePrincipal'")
+
+
+def traversal_ancestors(target_path):
+    """Returns container-relative ancestor directories that need execute (traversal) access."""
+    parts = [segment for segment in target_path.strip("/").split("/") if segment]
+    ancestors = [""]  # container root
+    for index in range(len(parts) - 1):
+        ancestors.append("/".join(parts[: index + 1]))
+    return ancestors
+
+
+def build_acl_entries(identity_type, object_id, permissions, is_directory):
+    """Builds additive access (and default, for directories) ACL entry tuples."""
+    posix_type = _map_posix_type(identity_type)
+    entries = [("access", posix_type, object_id, permissions)]
+    if is_directory:
+        entries.append(("default", posix_type, object_id, permissions))
+    return entries
+
+
+def _format_acl_entry(entry):
+    scope, posix_type, qualifier, permissions = entry
+    prefix = "default:" if scope == "default" else ""
+    return f"{prefix}{posix_type}:{qualifier}:{permissions}"
+
+
+def _parse_acl_string(acl_str):
+    parsed = {}
+    order = []
+    for raw in (acl_str or "").split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        pieces = token.split(":")
+        if pieces[0] == "default" and len(pieces) == 4:
+            entry = ("default", pieces[1], pieces[2], pieces[3])
+        elif len(pieces) == 3:
+            entry = ("access", pieces[0], pieces[1], pieces[2])
+        else:
+            continue
+        key = entry[:3]
+        if key not in parsed:
+            order.append(key)
+        parsed[key] = entry
+    return parsed, order
+
+
+def merge_acl_entries(existing_acl, new_entries):
+    """
+    Additively merges new entries into an existing ACL.
+
+    Existing unrelated entries are preserved; a matching (scope, type, qualifier)
+    has only its permissions updated. Never removes entries.
+    """
+    parsed, order = _parse_acl_string(existing_acl)
+    for entry in new_entries:
+        key = entry[:3]
+        if key not in parsed:
+            order.append(key)
+        parsed[key] = entry
+    return ",".join(_format_acl_entry(parsed[key]) for key in order)
+
+
+def _az_get_acl(account, container, path):
+    out = run_command([
+        "az", "storage", "fs", "access", "show",
+        "--account-name", account, "--file-system", container,
+        "--path", path or "/", "--auth-mode", "login", "-o", "json",
+    ])
+    try:
+        return json.loads(out).get("acl", "")
+    except json.JSONDecodeError:
+        return ""
+
+
+def _az_set_acl(account, container, path, acl):
+    return run_command([
+        "az", "storage", "fs", "access", "set",
+        "--account-name", account, "--file-system", container,
+        "--path", path or "/", "--acl", acl, "--auth-mode", "login", "-o", "json",
+    ])
+
+
+def _az_check_hns(account):
+    out = run_command([
+        "az", "storage", "account", "show", "--name", account,
+        "--query", "isHnsEnabled", "-o", "tsv",
+    ])
+    return out.strip().lower() == "true"
+
+
+def _az_set_recursive(account, container, path, acl):
+    out = run_command([
+        "az", "storage", "fs", "access", "set-recursive",
+        "--account-name", account, "--file-system", container,
+        "--path", path or "/", "--acl", acl, "--auth-mode", "login", "-o", "json",
+    ])
+    try:
+        counters = json.loads(out)
+        return {"failed": int(counters.get("failureCount", 0)), "output": out}
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return {"failed": 1, "output": out}
+
+
+def assign_adls_acl(
+    path=None,
+    object_id=None,
+    identity_type="user",
+    permissions="r-x",
+    is_directory=True,
+    apply_traversal=True,
+    recursive=False,
+    confirm_recursive=False,
+    ops=None,
+):
+    """
+    Grants additive ADLS Gen2 POSIX ACLs for a principal, with read-back verification.
+
+    Adds traversal (execute) ACLs on ancestor directories and access (plus default,
+    for directories) ACLs on the target. Existing unrelated ACL entries are preserved.
+    """
+    if not object_id or not object_id.strip():
+        return json.dumps({"error": "object_id is required"})
+
+    try:
+        parsed = parse_adls_path(path)
+        entries = build_acl_entries(identity_type, object_id.strip(), permissions, is_directory)
+    except AdlsPathError as error:
+        return json.dumps({"error": str(error)})
+
+    if recursive and not confirm_recursive:
+        return json.dumps({"error": "recursive updates require confirm_recursive=True"})
+
+    account, container, target = parsed["account"], parsed["container"], parsed["path"]
+
+    get_acl = (ops or {}).get("get_acl", _az_get_acl)
+    set_acl = (ops or {}).get("set_acl", _az_set_acl)
+    check_hns = (ops or {}).get("check_hns", _az_check_hns)
+
+    if not check_hns(account):
+        return json.dumps({
+            "error": f"Storage account '{account}' does not have hierarchical namespace (HNS) enabled; POSIX ACLs are unavailable.",
+        })
+
+    batch = guardrails.BatchResult(f"adls_acl:{account}/{container}/{target}")
+
+    def apply_to(node_path, node_entries, label):
+        def execute():
+            merged = merge_acl_entries(get_acl(account, container, node_path), node_entries)
+            return set_acl(account, container, node_path, merged)
+
+        def verify():
+            current = get_acl(account, container, node_path)
+            return (all(_format_acl_entry(e) in current for e in node_entries), current)
+
+        result = guardrails.run_verified_operation(f"{label}:{node_path or '/'}", execute, verify)
+        batch.add(result)
+        return result
+
+    if apply_traversal:
+        traversal_entry = ("access", _map_posix_type(identity_type), object_id.strip(), "--x")
+        for ancestor in traversal_ancestors(target):
+            apply_to(ancestor, [traversal_entry], "traversal")
+
+    apply_to(target, entries, "target")
+
+    if recursive:
+        set_recursive = (ops or {}).get("set_recursive", _az_set_recursive)
+        recursion = guardrails.OperationResult(f"recursive:{target}")
+        merged = merge_acl_entries(get_acl(account, container, target), entries)
+        outcome = set_recursive(account, container, target, merged)
+        failed = int(outcome.get("failed", 0))
+        recursion.evidence["recursion"] = outcome
+        if failed > 0:
+            recursion.command_status = guardrails.COMMAND_FAILED
+            recursion.verification_status = guardrails.VERIFICATION_SKIPPED
+            recursion.failures.append(f"{failed} child path(s) failed during recursive update.")
+        else:
+            recursion.verification_status = guardrails.VERIFIED
+        batch.add(recursion)
+
+    return batch.to_json()
