@@ -19,15 +19,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Update version
-        run: |
-          sed -i "s/^version = .*/version = \"${{ inputs.version }}\"/" pip/pyproject.toml
-          npm --prefix extension version "${{ inputs.version }}" --no-git-tag-version
+        run: sed -i "s/^version = .*/version = \"${{ inputs.version }}\"/" pip/pyproject.toml
 
       - name: Commit version bump and tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pip/pyproject.toml extension/package.json extension/package-lock.json
+          git add pip/pyproject.toml
           git diff --cached --quiet && echo "Version already up to date" || git commit -m "release: v${{ inputs.version }}"
           git tag -f "v${{ inputs.version }}"
           git push origin HEAD --tags --force
@@ -54,84 +52,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pip/dist/
-
-  build-extension:
-    needs: version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: win32-x64
-            executable: extension/bin/azplex-server/azplex-server.exe
-          - os: ubuntu-22.04
-            target: linux-x64
-            executable: extension/bin/azplex-server/azplex-server
-          - os: macos-13
-            target: darwin-x64
-            executable: extension/bin/azplex-server/azplex-server
-          - os: macos-14
-            target: darwin-arm64
-            executable: extension/bin/azplex-server/azplex-server
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: v${{ inputs.version }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: extension/package-lock.json
-
-      - name: Install build dependencies
-        run: python -m pip install -r extension/native/requirements-build.txt
-
-      - name: Build native MCP server
-        run: python -m PyInstaller --clean --noconfirm extension/native/azplex-server.spec --distpath extension/build/dist --workpath extension/build/work
-
-      - name: Stage native MCP server
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force extension/bin | Out-Null
-          Copy-Item extension/build/dist/azplex-server extension/bin/azplex-server -Recurse
-          if (-not $IsWindows) { chmod +x "${{ matrix.executable }}" }
-
-      - name: Smoke-test native MCP tools
-        run: node extension/native/smoke-test.js "${{ matrix.executable }}"
-
-      - name: Package platform extension
-        working-directory: extension
-        run: |
-          npm ci
-          npx vsce package --follow-symlinks --target ${{ matrix.target }} --out azplex-${{ inputs.version }}-${{ matrix.target }}.vsix
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: azplex-${{ matrix.target }}
-          path: extension/azplex-${{ inputs.version }}-${{ matrix.target }}.vsix
-
-  github-release:
-    needs: [publish-pip, build-extension]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: v${{ inputs.version }}
-          fetch-depth: 0
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: azplex-*
-          path: artifacts
-          merge-multiple: true
-
-      - name: Generate release notes and create release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ inputs.version }}" artifacts/*.vsix --title "v${{ inputs.version }}" --generate-notes
